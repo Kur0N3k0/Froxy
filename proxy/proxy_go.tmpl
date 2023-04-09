@@ -1,0 +1,400 @@
+package proxy
+
+import (
+	"bufio"
+	"bytes"
+	"compress/flate"
+	"compress/gzip"
+	"compress/zlib"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"math/big"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/andybalholm/brotli"
+)
+
+type contextKey struct {
+	key string
+}
+
+var ConnContextKey = &contextKey{"http-conn"}
+
+func SaveConnInContext(ctx context.Context, c net.Conn) context.Context {
+	return context.WithValue(ctx, ConnContextKey, c)
+}
+func GetConn(r *http.Request) net.Conn {
+	return r.Context().Value(ConnContextKey).(net.Conn)
+}
+
+type rootCert struct {
+	certkey []byte
+	cacrt   []byte
+	cakey   []byte
+}
+
+type ProxyHistory struct {
+	ServerIp       string
+	TLS            bool
+	RequestMethod  string
+	RequestHost    string
+	RequestURL     string
+	ResponseLength int64
+	ResponseStatus int
+	RawRequest     []byte
+	RawResponse    []byte
+}
+
+var root rootCert
+var certs map[string][]byte = make(map[string][]byte)
+var callback func(ProxyHistory)
+var clog func(string)
+var History []ProxyHistory = make([]ProxyHistory, 0)
+var historyMutex sync.Mutex
+
+func genCert(host string) {
+	certKeyPem, _ := pem.Decode(root.certkey)
+	certKey, err := x509.ParsePKCS8PrivateKey(certKeyPem.Bytes)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	clientCert := x509.Certificate{
+		SerialNumber: big.NewInt(9505),
+		Subject: pkix.Name{
+			CommonName: host,
+		},
+		DNSNames:              []string{host},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(time.Hour * 24 * 365),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	block, _ := pem.Decode(root.cacrt)
+	caCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		fmt.Println("ParseCertificate Failure")
+		return
+	}
+
+	caKeyPem, _ := pem.Decode(root.cakey)
+	caKey, err := x509.ParsePKCS8PrivateKey(caKeyPem.Bytes)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	cert, err := x509.CreateCertificate(rand.Reader, &clientCert, caCert, certKey.(*rsa.PrivateKey).Public(), caKey)
+	if err != nil {
+		fmt.Println(err.Error())
+		fmt.Println("CreateCertificate Failure")
+		return
+	}
+
+	out := &bytes.Buffer{}
+	pem.Encode(out, &pem.Block{Type: "CERTIFICATE", Bytes: cert})
+	certs[host] = out.Bytes()
+}
+
+func handleTunneling(w http.ResponseWriter, r *http.Request) {
+	host := strings.Split(r.Host, ":")[0]
+	fmt.Println("Tunneling:", host)
+
+	dest_conn, err := tls.Dial("tcp", r.Host, &tls.Config{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	if _, ok := certs[host]; !ok {
+		genCert(host)
+	}
+
+	cert, err := tls.X509KeyPair(certs[host], root.certkey)
+	if err != nil {
+		log.Fatalf("server: loadkeys: %s", err)
+	}
+	config := tls.Config{Certificates: []tls.Certificate{cert}}
+
+	w.WriteHeader(http.StatusOK)
+
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		return
+	}
+	hijacker.Hijack()
+
+	server := GetConn(r)
+	client_conn := tls.Server(server, &config)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+	}
+
+	client_conn.Handshake()
+
+	go func() {
+		defer dest_conn.Close()
+		defer client_conn.Close()
+
+		clientReader := bufio.NewReader(client_conn)
+		for {
+			req, err := http.ReadRequest(clientReader)
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				clog("Error reading from client: " + err.Error())
+				return
+			}
+
+			rawReq := logRequest(req)
+
+			if err := req.Write(dest_conn); err != nil {
+				clog("Error forwarding request to destination: " + err.Error())
+				return
+			}
+
+			res, err := http.ReadResponse(bufio.NewReader(dest_conn), req)
+			if err != nil {
+				clog("Error reading response from destination: %v" + err.Error())
+				return
+			}
+
+			body, _ := ioutil.ReadAll(res.Body)
+			contentEncoding := res.Header.Get("Content-Encoding")
+			if contentEncoding != "" {
+				clog(contentEncoding)
+				contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
+				encodedBody := ioutil.NopCloser(bytes.NewReader(body))
+				encodings := strings.Split(contentEncoding, ",")
+				for _, encoding := range encodings {
+					decodedBody, err := DecodeBody(encodedBody, strings.TrimSpace(encoding))
+					if err != nil {
+						fmt.Printf("Error decoding body: %v\n", err)
+						break
+					}
+					defer decodedBody.Close()
+
+					body, err = ioutil.ReadAll(decodedBody)
+					if err != nil {
+						fmt.Printf("Error reading decoded body: %v\n", err)
+						break
+					}
+					encodedBody = ioutil.NopCloser(bytes.NewReader(body))
+				}
+			}
+
+			delete(res.Header, "Transfer-Encoding")
+			delete(res.Header, "Content-Encoding")
+
+			newResponse := &http.Response{
+				Status:           res.Status,
+				StatusCode:       res.StatusCode,
+				Proto:            res.Proto,
+				ProtoMajor:       res.ProtoMajor,
+				ProtoMinor:       res.ProtoMinor,
+				Header:           res.Header.Clone(),
+				Body:             ioutil.NopCloser(bytes.NewReader(body)),
+				ContentLength:    int64(len(body)),
+				TransferEncoding: nil,
+				Close:            false,
+				Uncompressed:     true,
+				Request:          res.Request,
+				TLS:              res.TLS,
+			}
+
+			rawRes := logResponse(newResponse)
+			if err := newResponse.Write(client_conn); err != nil {
+				log.Printf("Error forwarding response to client: %v", err)
+				return
+			}
+
+			hostname := r.URL.Hostname()
+			history := ProxyHistory{
+				ServerIp:       hostname,
+				TLS:            true,
+				RequestMethod:  req.Method,
+				RequestHost:    hostname,
+				RequestURL:     req.URL.RequestURI(),
+				ResponseLength: newResponse.ContentLength,
+				ResponseStatus: newResponse.StatusCode,
+				RawRequest:     rawReq,
+				RawResponse:    rawRes,
+			}
+			historyMutex.Lock()
+			History = append(History, history)
+			historyMutex.Unlock()
+			callback(history)
+		}
+	}()
+}
+
+func logRequest(req *http.Request) []byte {
+	dump, err := httputil.DumpRequest(req, true)
+	if err != nil {
+		clog("Error dumping request: " + err.Error())
+		return nil
+	}
+
+	log.Println("Request:")
+	log.Println(string(dump))
+	return dump
+}
+
+func logResponse(res *http.Response) []byte {
+	dump, err := httputil.DumpResponse(res, true)
+	if err != nil {
+		log.Printf("Error dumping response: %v", err)
+		return nil
+	}
+
+	log.Println("Response:")
+	log.Println(string(dump))
+	return dump
+}
+
+func DecodeBody(encodedBody io.ReadCloser, encoding string) (io.ReadCloser, error) {
+	switch encoding {
+	case "gzip":
+		return gzip.NewReader(encodedBody)
+	case "deflate":
+		return flate.NewReader(encodedBody), nil
+	case "zlib":
+		return zlib.NewReader(encodedBody)
+	case "br":
+		return ioutil.NopCloser(brotli.NewReader(encodedBody)), nil
+	default:
+		return nil, fmt.Errorf("unsupported content encoding: %s", encoding)
+	}
+}
+
+func handleHTTP(w http.ResponseWriter, req *http.Request) {
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer resp.Body.Close()
+
+	// res, _ := http.ReadResponse(bufio.NewReader(strings.NewReader(buf2.String())), req)
+	body, _ := io.ReadAll(resp.Body)
+
+	contentEncoding := resp.Header.Get("Content-Encoding")
+	if contentEncoding != "" {
+		clog(contentEncoding)
+		contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
+		encodedBody := ioutil.NopCloser(bytes.NewReader(body))
+		encodings := strings.Split(contentEncoding, ",")
+		for _, encoding := range encodings {
+			decodedBody, err := DecodeBody(encodedBody, strings.TrimSpace(encoding))
+			if err != nil {
+				clog("Error decoding body: " + err.Error())
+				break
+			}
+			defer decodedBody.Close()
+
+			body, err = ioutil.ReadAll(decodedBody)
+			if err != nil {
+				clog("Error reading decoded body: " + err.Error())
+				break
+			}
+			encodedBody = ioutil.NopCloser(bytes.NewReader(body))
+		}
+	}
+
+	delete(resp.Header, "Transfer-Encoding")
+	delete(resp.Header, "Content-Encoding")
+	resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+
+	newResponse := &http.Response{
+		Status:           resp.Status,
+		StatusCode:       resp.StatusCode,
+		Proto:            resp.Proto,
+		ProtoMajor:       resp.ProtoMajor,
+		ProtoMinor:       resp.ProtoMinor,
+		Header:           resp.Header,
+		Body:             ioutil.NopCloser(bytes.NewReader(body)),
+		ContentLength:    int64(len(body)),
+		TransferEncoding: nil,
+		Close:            false,
+		Uncompressed:     true,
+		Request:          resp.Request,
+		TLS:              resp.TLS,
+	}
+
+	rawRaw := logRequest(req)
+	rawRes := logResponse(newResponse)
+
+	curhis := ProxyHistory{
+		ServerIp:       req.Host,
+		TLS:            false,
+		RequestMethod:  req.Method,
+		RequestHost:    req.Host,
+		RequestURL:     req.URL.RequestURI(),
+		ResponseLength: int64(len(body)),
+		ResponseStatus: newResponse.StatusCode,
+		RawRequest:     rawRaw,
+		RawResponse:    rawRes,
+	}
+	historyMutex.Lock()
+	History = append(History, curhis)
+	callback(curhis)
+	historyMutex.Unlock()
+
+	log.Println(req.RemoteAddr, " ", resp.Status)
+
+	copyHeader(w.Header(), newResponse.Header)
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, newResponse.Body)
+}
+
+func copyHeader(dst, src http.Header) {
+	for k, vv := range src {
+		for _, v := range vv {
+			dst.Set(k, v)
+		}
+	}
+}
+
+func init() {
+	root.cacrt = []byte(`__CA_CRT__`)
+	root.cakey = []byte(`__CA_KEY__`)
+    root.certkey = []byte(`__CERT_KEY__`)
+}
+
+func RunProxy(addr string, cb func(ProxyHistory), flog func(string)) {
+	callback = cb
+	clog = flog
+
+	server := &http.Server{
+		Addr: addr,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodConnect {
+				handleTunneling(w, r)
+			} else {
+				handleHTTP(w, r)
+			}
+		}),
+		ConnContext: SaveConnInContext,
+		// Disable HTTP/2.
+		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+	}
+
+	log.Fatal(server.ListenAndServe())
+}

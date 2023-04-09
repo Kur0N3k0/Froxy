@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Froxy - KuroNeko</title>
+
+    <!-- tui-grid CSS -->
+    <link rel="stylesheet" href="css/tui-grid.css" />
+
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="css/codemirror.css" />
+    <link rel="stylesheet" href="css/dracula.min.css" />
+    
+    <!-- Home CSS -->
+    <link rel="stylesheet" href="css/home.css" />
+</head>
+
+<body>
+    <div class="container">
+        <div class="left">
+            <div id="grid"></div>
+        </div>
+        <div class="middle"></div>
+        <div class="right">
+            <div id="request-label">
+                <h4 style="margin-top: 9px; margin-bottom: 8px; color: white;">Request</h4>
+            </div>
+            <div class="http-request">
+                <div id="request-editor"></div>
+            </div>
+            <div id="response-label">
+                <h4 style="margin-top: 9px; margin-bottom: 9px; color: white;">Response</h4>
+            </div>
+            <div class="http-response">
+                <div id="response-editor"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- tui-grid library -->
+    <script src="js/tui-grid.js"></script>
+
+    <!-- CodeMirror library -->
+    <script src="js/codemirror.min.js"></script>
+    <script src="js/http.min.js"></script>
+
+    <!-- Home script -->
+    <script src="js/home.js"></script>
+</body>
+
+</html>

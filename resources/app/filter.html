@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="stylesheet" href="https://uicdn.toast.com/grid/latest/tui-grid.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/dracula.min.css" />
+</head>
+<style>
+    body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background-color: #35363a;
+        width: 400px;
+        height: 600px;
+        /* border: 2px solid #fff; */
+    }
+
+    .container {
+        /* display: flex; */
+        height: 100%;
+    }
+
+    #grid {
+        /* flex: 1; */
+        height: 100%;
+        width: 100%;
+    }
+
+    .grid-container {
+        height: 100%;
+        overflow-y: scroll;
+    }
+
+    .tui-grid-editor {
+        background-color: #404040;
+    }
+
+    .tui-grid-layer-state {
+        background-color: #404040;
+    }
+</style>
+
+<body>
+    <div class="container">
+        <div id="grid"></div>
+        <div id="ctxmenu"></div>
+    </div>
+    <script src="https://uicdn.toast.com/grid/latest/tui-grid.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/display/placeholder.js"></script>
+    <script>
+        var Grid = tui.Grid;
+        Grid.applyTheme('clean', {
+            outline: {
+                border: '#515151'
+            },
+            area: {
+                header: {
+                    background: '#515151',
+                    border: '#515151',
+                },
+                body: {
+                    background: '#404040',
+                }
+            },
+            cell: {
+                normal: {
+                    background: '#404040',
+                    showVerticalBorder: false,
+                    showHorizontalBorder: false,
+                    text: '#fff',
+                },
+                header: {
+                    background: '#515151',
+                    showVerticalBorder: false,
+                    showVerticalBorder: false,
+                    text: '#fff',
+                },
+                selectedHeader: {
+                    background: '#4444444',
+                    text: '#fff',
+                },
+                editable: {
+                    background: '#404040',
+                },
+                rowHeader: {
+                    background: '#515151',
+                }
+            },
+            scrollbar: {
+                background: '#35363a',
+                emptySpace: '#35363a',
+                border: '#35363a',
+            },
+            row: {
+                hover: {
+                    background: '#333333'
+                }
+            },
+        });
+
+        CodeMirror.defineMode("regex", function () {
+            return {
+                token: function (stream) {
+                    if (stream.match(/(\.\*|\.\+|\.\?|\\[bdswBDWS]|\\[1-9]|\\[pP]\{[a-zA-Z0-9]+\}|\\[a-zA-Z]|\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\U[0-9a-fA-F]{8}|\[|\]|^$|\(\?:|\(\?\!|\(\?\=|\(\?\<|\(\?\<\!|\(|\)|\|)/)) {
+                        return "keyword";
+                    } else if (stream.match(/(\*|\+|\?|\{\d+\,?\d*\})/)) {
+                        return "operator";
+                    } else if (stream.match(/(\^|\$)/)) {
+                        return "builtin";
+                    } else if (stream.match(/(\[|\])/)) {
+                        return "bracket";
+                    } else if (stream.match(/(\{|\})/)) {
+                        return "brace";
+                    } else if (stream.match(/(\(|\))/)) {
+                        return "paren";
+                    } else if (stream.match(/(\\[^\s])/)) {
+                        return "escape";
+                    } else {
+                        stream.next();
+                        return "variable";
+                    }
+                }
+            };
+        });
+
+        const grids = new Grid({
+            el: document.getElementById("grid"),
+            rowHeaders: ['checkbox'],
+            columns: [
+                {
+                    name: 'Type',
+                    width: 80,
+                    resizable: true,
+                    editor: {
+                        type: 'select',
+                        options: {
+                            listItems: [
+                                { text: 'Host', value: 'Host' },
+                                { text: 'Url', value: 'Url' }
+                            ]
+                        }
+                    },
+                }, {
+                    name: 'Regex',
+                    minWidth: 120,
+                    resizable: true,
+                    editor: 'text'
+                }],
+            data: [
+                {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                }, {
+                    Type: 'Host',
+                    Regex: '/.+youtube\\.com/i'
+                },
+            ],
+            scrollX: false,
+            scrollY: true,
+            resizable: true,
+            bodyHeight: 'fitToParent',
+            fixedHeader: true,
+            selectionUnit: 'row',
+            editingEvent: 'click',
+            // minHeight: '600px',
+            // height: '600px',
+            sortState: {
+                columnName: 'Type',
+                ascending: false
+            },
+            style: {
+                table: {
+                    'font-size': '13px',
+                    'overflow-y': 'hidden'
+                },
+                container: {
+                    'padding': '0px'
+                }
+            },
+            contextMenu: ({ rowKey, columnName }) => (
+                [
+                    [
+                        {
+                            name: 'New',
+                            label: 'New',
+                            action: () => {
+                                grids.appendRow({ Type: 'Host', Regex: '' })
+                                grids.focus(grids.getRowCount() - 1, 'Regex', true)
+                                grids.startEditing(grids.getRowCount() - 1, 'Regex', true)
+                            }
+                        },
+                        {
+                            name: 'Remove',
+                            label: 'Remove',
+                            action: () => {
+                                if(grids.getRowCount() === 1) {
+                                    return
+                                }
+                                const cell = grids.getFocusedCell()
+                                grids.removeRow(cell.rowKey)
+                            }
+                        },
+                        {
+                            name: 'Remove Items',
+                            label: 'Remove Items',
+                            action: () => {
+                                grids.removeCheckedRows()
+                                if(grids.getRowCount() === 0) {
+                                    grids.appendRow({ Type: 'Host', Regex: '' })
+                                }
+                            }
+                        },
+                        {
+                            name: 'RemoveAll',
+                            label: 'RemoveAll',
+                            action: () => {
+                                grids.clear()
+                                grids.appendRow({ Type: 'Host', Regex: '' })
+                            }
+                        }
+                    ],
+                ]
+            ),
+        });
+
+        grids.on('contextmenu', (ev) => {
+            if (ev.command === 'helloWorld') {
+                console.log('Hello, World! 메뉴 항목이 클릭되었습니다.');
+            }
+        });
+
+    </script>
+</body>
+
+</html>

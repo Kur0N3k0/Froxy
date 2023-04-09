@@ -1,0 +1,2 @@
+/app/app &
+redis-server
