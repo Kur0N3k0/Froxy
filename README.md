@@ -29,6 +29,7 @@ go install github.com/asticode/go-astilectron-bundler/astilectron-bundler
 ### Shortcuts
 ```
 F12: Devtools
+Ctrl + G: Issue Request (Content-Length auto modified)
 Ctrl + B: Selection base64 encoding
 Ctrl + Shift + B: Selection base64 decoding
 Ctrl + E: Selection URL encoding (encodeURIComponent)
