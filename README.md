@@ -38,6 +38,8 @@ Ctrl + Shift + E: Selection URL decoding (encodeURIComponent)
 ## TODO
 - [x] HTTP/HTTPS Proxy
 - [x] Shortcuts
+- [ ] Request/Response Match & Replace
+- [ ] Interceptor
 - [ ] En/Decoder Window
 - [ ] Socks5 Support
 - [ ] Websocket Support
