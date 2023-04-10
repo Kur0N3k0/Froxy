@@ -161,6 +161,35 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			body, _ := ioutil.ReadAll(req.Body)
+			contentEncoding := req.Header.Get("Content-Encoding")
+			if contentEncoding != "" {
+				clog(contentEncoding)
+				contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
+				encodedBody := ioutil.NopCloser(bytes.NewReader(body))
+				encodings := strings.Split(contentEncoding, ",")
+				for _, encoding := range encodings {
+					decodedBody, err := DecodeBody(encodedBody, strings.TrimSpace(encoding))
+					if err != nil {
+						fmt.Printf("Error decoding body: %v\n", err)
+						break
+					}
+					defer decodedBody.Close()
+
+					body, err = ioutil.ReadAll(decodedBody)
+					if err != nil {
+						fmt.Printf("Error reading decoded body: %v\n", err)
+						break
+					}
+					encodedBody = ioutil.NopCloser(bytes.NewReader(body))
+				}
+			}
+
+			delete(req.Header, "Transfer-Encoding")
+			delete(req.Header, "Content-Encoding")
+
+			req.Body = ioutil.NopCloser(bytes.NewReader(body))
+			req.ContentLength = int64(len(body))
 			rawReq := logRequest(req)
 
 			if err := req.Write(dest_conn); err != nil {
@@ -174,8 +203,8 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			body, _ := ioutil.ReadAll(res.Body)
-			contentEncoding := res.Header.Get("Content-Encoding")
+			body, _ = ioutil.ReadAll(res.Body)
+			contentEncoding = res.Header.Get("Content-Encoding")
 			if contentEncoding != "" {
 				clog(contentEncoding)
 				contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
@@ -216,6 +245,8 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 				Request:          res.Request,
 				TLS:              res.TLS,
 			}
+			res.Body = ioutil.NopCloser(bytes.NewReader(body))
+			res.ContentLength = int64(len(body))
 
 			rawRes := logResponse(newResponse)
 			if err := newResponse.Write(client_conn); err != nil {

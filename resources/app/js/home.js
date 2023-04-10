@@ -1,3 +1,12 @@
+String.prototype.toBuffer = function (){
+    var buf = new ArrayBuffer(this.length)
+    var bufView = new Uint8Array(buf)         
+    for (var i = 0, strLen = this.length; i < strLen; i++) {      
+        bufView[i] = this.charCodeAt(i)       
+    }
+    return buf
+}
+
 // Grid.js
 const Grid = tui.Grid;
 Grid.applyTheme('clean', {
@@ -111,9 +120,18 @@ const grids = new Grid({
 });
 
 grids.sort('#', false, false)
-// grids.setBodyHeight(window.innerHeight - 40)
 
 var current = -1;
+function isDecodeTargetMIME(content_type) {
+    let MIME = ["text/", "application/json", "application/xml", "application/xhtml+xml"]
+    let avoid = "javascript"
+    for (let i = 0; i < MIME.length; i++) {
+        if(content_type.indexOf(MIME[i]) !== -1 && content_type.indexOf(avoid) === -1) {
+            return true
+        }
+    }
+    return false
+}
 
 grids.on('focusChange', (ev) => {
     console.log(ev)
@@ -123,7 +141,6 @@ grids.on('focusChange', (ev) => {
         end: [rowKey, grids.getColumns().length - 1]
     })
 
-    const range = grids.getSelectionRange()
     current = ev.rowKey
     astilectron.sendMessage({
         type: "history",
@@ -132,7 +149,26 @@ grids.on('focusChange', (ev) => {
         console.log(message)
         if (message) {
             requestEditor.setValue(atob(message.request))
-            responseEditor.setValue(atob(message.response))
+            let resp = atob(message.response)
+            let tmp = resp.split("\n\n")
+            let headerstr = tmp[0]
+            let body = tmp.slice(1).join("\n\n")
+            if (body.length >= 0) {
+                let header = {}
+                let reslines = headerstr.split("\n")
+                reslines.slice(1).forEach((val) => {
+                    let tmp = val.split(": ")
+                    let key = tmp[0]
+                    header[key] = tmp.slice(1).join(": ")
+                })
+
+                if (parseInt(header["Content-Length"]) > 0 && isDecodeTargetMIME(header["Content-Type"])) {
+                    let decoder = new TextDecoder(Encoding.detect(resp))
+                    resp = decoder.decode(resp.toBuffer())
+                }
+            }
+            
+            responseEditor.setValue(resp)
         }
     })
 })
