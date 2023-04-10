@@ -1,8 +1,8 @@
-String.prototype.toBuffer = function (){
+String.prototype.toBuffer = function () {
     var buf = new ArrayBuffer(this.length)
-    var bufView = new Uint8Array(buf)         
-    for (var i = 0, strLen = this.length; i < strLen; i++) {      
-        bufView[i] = this.charCodeAt(i)       
+    var bufView = new Uint8Array(buf)
+    for (var i = 0, strLen = this.length; i < strLen; i++) {
+        bufView[i] = this.charCodeAt(i)
     }
     return buf
 }
@@ -127,7 +127,7 @@ function isDecodeTargetMIME(content_type) {
     let MIME = ["text/", "application/json", "application/xml", "application/xhtml+xml"]
     let avoid = "javascript"
     for (let i = 0; i < MIME.length; i++) {
-        if(content_type.indexOf(MIME[i]) !== -1 && content_type.indexOf(avoid) === -1) {
+        if (content_type.indexOf(MIME[i]) !== -1 && content_type.indexOf(avoid) === -1) {
             return true
         }
     }
@@ -168,8 +168,9 @@ grids.on('focusChange', (ev) => {
                     resp = decoder.decode(resp.toBuffer())
                 }
             }
-            
+
             responseEditor.setValue(resp)
+
         }
     })
 })
@@ -207,6 +208,7 @@ function Issue() {
         console.log(message)
         if (message) {
             responseEditor.setValue(atob(message.response))
+            
         }
     })
 }
@@ -218,14 +220,10 @@ window.addEventListener('keydown', function (event) {
 });
 
 CodeMirror.defineMode('http-json', function (config) {
-    return CodeMirror.multiplexingMode(
+    return CodeMirror.overlayMode(
         CodeMirror.getMode(config, 'http'),
-        {
-            open: /^\s*\{/, // JSON body를 시작하는 중괄호를 찾습니다.
-            close: /^\s*\}/, // JSON body를 닫는 중괄호를 찾습니다.
-            mode: CodeMirror.getMode(config, 'javascript'),
-            delimStyle: 'delimit'
-        }
+        CodeMirror.getMode(config, { name: 'javascript', json: true }),
+        { opaque: true }
     );
 });
 
@@ -236,8 +234,12 @@ const requestEditor = CodeMirror(document.getElementById("request-editor"), {
     mode: "http-json",
     lineNumbers: true,
     lineWrapping: true,
-    indentUnit: 4,
+    // indentUnit: 4,
     theme: "dracula",
+    autoCloseBrackets: true,
+    matchBrackets: true,
+    styleActiveLine: true,
+    smartIndent: true,
     extraKeys: {
         'Ctrl-E': function (editor) {
             editor.replaceSelection(encodeURIComponent(editor.getSelection()))
@@ -260,6 +262,9 @@ const responseEditor = CodeMirror(document.getElementById("response-editor"), {
     lineWrapping: true,
     indentUnit: 4,
     theme: "dracula",
+    autoCloseBrackets: true,
+    matchBrackets: true,
+    styleActiveLine: true,
     extraKeys: {
         'Ctrl-E': function (editor) {
             editor.replaceSelection(encodeURIComponent(editor.getSelection()))
