@@ -215,22 +215,22 @@ func main() {
 
 						encodedBody := ioutil.NopCloser(bytes.NewReader(bbody))
 						contentEncoding := res.Header.Get("Content-Encoding")
-						encodings := strings.Split(contentEncoding, ",")
-						var body []byte
-						for _, encoding := range encodings {
-							decodedBody, err := proxy.DecodeBody(encodedBody, strings.TrimSpace(encoding))
-							if err != nil {
-								fmt.Printf("Error decoding body: %v\n", err)
-								return
-							}
-							defer decodedBody.Close()
+						var body []byte = bbody
+						if contentEncoding != "" {
+							encodings := strings.Split(contentEncoding, ",")
+							for _, encoding := range encodings {
+								decodedBody, err := proxy.DecodeBody(encodedBody, strings.TrimSpace(encoding))
+								if err != nil {
+									return fmt.Sprintf("Error decoding body: %v\n", err)
+								}
+								defer decodedBody.Close()
 
-							body, err = ioutil.ReadAll(decodedBody)
-							if err != nil {
-								fmt.Printf("Error reading decoded body: %v\n", err)
-								return
+								body, err = ioutil.ReadAll(decodedBody)
+								if err != nil {
+									return fmt.Sprintf("Error reading decoded body: %v\n", err)
+								}
+								encodedBody = ioutil.NopCloser(bytes.NewReader(body))
 							}
-							encodedBody = ioutil.NopCloser(bytes.NewReader(body))
 						}
 
 						delete(res.Header, "Transfer-Encoding")
