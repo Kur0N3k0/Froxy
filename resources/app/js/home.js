@@ -102,6 +102,7 @@ const grids = new Grid({
     scrollY: true,
     resizable: true,
     bodyHeight: 'fitToParent',
+    // bodyHeight: 100,
     fixedHeader: true,
     selectionUnit: 'row',
     sortState: {
@@ -216,11 +217,26 @@ window.addEventListener('keydown', function (event) {
     }
 });
 
+CodeMirror.defineMode('http-json', function (config) {
+    return CodeMirror.multiplexingMode(
+        CodeMirror.getMode(config, 'http'),
+        {
+            open: /^\s*\{/, // JSON body를 시작하는 중괄호를 찾습니다.
+            close: /^\s*\}/, // JSON body를 닫는 중괄호를 찾습니다.
+            mode: CodeMirror.getMode(config, 'javascript'),
+            delimStyle: 'delimit'
+        }
+    );
+});
+
+CodeMirror.defineMIME('http-json', 'http-json');
+
 // CodeMirror
 const requestEditor = CodeMirror(document.getElementById("request-editor"), {
-    mode: "http",
+    mode: "http-json",
     lineNumbers: true,
     lineWrapping: true,
+    indentUnit: 4,
     theme: "dracula",
     extraKeys: {
         'Ctrl-E': function (editor) {
@@ -239,9 +255,10 @@ const requestEditor = CodeMirror(document.getElementById("request-editor"), {
 });
 
 const responseEditor = CodeMirror(document.getElementById("response-editor"), {
-    mode: "http",
+    mode: "http-json",
     lineNumbers: true,
     lineWrapping: true,
+    indentUnit: 4,
     theme: "dracula",
     extraKeys: {
         'Ctrl-E': function (editor) {
