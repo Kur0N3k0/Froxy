@@ -217,110 +217,95 @@ window.addEventListener('keydown', function (event) {
     }
 });
 
-CodeMirror.defineMode("simple-json", function () {
-    const keywords = {
-        "true": true, "false": true, "null": true
-    };
-
-    function tokenBase(stream, state) {
-        const ch = stream.peek();
-
-        if (ch === '"' || ch === "'") {
-            stream.next();
-            state.tokenize = tokenString(ch);
-            return state.tokenize(stream, state);
-        }
-        if (ch === '{' || ch === '[') {
-            stream.next();
-            state.depth++;
-            return 'bracket';
-        }
-        if (ch === '}' || ch === ']') {
-            stream.next();
-            state.depth--;
-            return 'bracket';
-        }
-        if (/\d/.test(ch)) {
-            stream.match(/^\d*(?:\.\d*)?(?:[eE][+\-]?\d+)?/);
-            return 'number';
-        }
-        if (stream.match(/^(?:true|false|null)/)) {
-            return 'keyword';
-        }
-        stream.next();
-        return null;
-    }
-
-    function tokenString(quote) {
-        return function (stream, state) {
-            let escaped = false, ch;
-
-            while ((ch = stream.next()) !== null) {
-                if (ch === quote && !escaped) {
-                    state.tokenize = tokenBase;
-                    break;
-                }
-                escaped = !escaped && ch === '\\';
-            }
-            return 'string';
-        };
-    }
+CodeMirror.defineMode("httpWithContentType", function (config, parserConfig) {
+    const httpMode = CodeMirror.getMode(config, "http");
+    const jsonMode = CodeMirror.getMode(config, "javascript");
+    const htmlmixedMode = CodeMirror.getMode(config, "htmlmixed");
+    const cssMode = CodeMirror.getMode(config, "css");
 
     return {
         startState: function () {
             return {
-                tokenize: tokenBase,
-                depth: 0,
-            };
+                inBody: false,
+                contentType: null,
+                reqline: false,
+                http: CodeMirror.startState(httpMode),
+                json: CodeMirror.startState(jsonMode),
+                htmlmixed: CodeMirror.startState(htmlmixedMode),
+                css: CodeMirror.startState(cssMode),
+            }
         },
-
+        copyState: function (state) {
+            return {
+                inBody: state.inBody,
+                contentType: state.contentType,
+                http: CodeMirror.copyState(httpMode, state.http),
+                json: CodeMirror.copyState(jsonMode, state.json),
+                htmlmixed: CodeMirror.copyState(htmlmixedMode, state.htmlmixed),
+                css: CodeMirror.copyState(cssMode, state.css),
+            }
+        },
         token: function (stream, state) {
-            if (stream.eatSpace()) return null;
-            return state.tokenize(stream, state);
-        },
+            if (!state.inBody) {
+                const token = httpMode.token(stream, state.http);
+                if (token === "string" && stream.string.includes("Content-Type")) {
+                    if (stream.string.includes("application/json")) {
+                        state.contentType = "json";
+                    } else if (stream.string.includes("html") || stream.string.includes("xml")) {
+                        state.contentType = "htmlmixed";
+                    } else if (stream.string.includes("css")) {
+                        state.contentType = "css"
+                    }
+                }
 
-        closeBrackets: { pairs: '()[]{}""' },
-        fold: 'brace'
+                if (stream.eol()) {
+                    if (token === null) {
+                        if(state.reqline === false) {
+                            state.reqline = true
+                        } else {
+                            state.inBody = true
+                            stream.backUp(stream.pos)
+                            return null
+                        }
+                    }
+                }
+                return token;
+            }
+
+            if (state.inBody) {
+                if (state.contentType === "json") {
+                    console.log("json")
+                    return jsonMode.token(stream, state.json);
+                } else if (state.contentType === "htmlmixed") {
+                    console.log("htmlmixed")
+                    return htmlmixedMode.token(stream, state.htmlmixed);
+                } else if (state.contentType === "css") {
+                    console.log("css~")
+                    return cssMode.token(stream, state.css)
+                }
+            }
+
+            return httpMode.token(stream, state.http);
+        },
+        innerMode: function (state) {
+            if (!state.inBody) {
+                return { state: state.http, mode: httpMode };
+            } else {
+                if (state.contentType === "json") {
+                    return { state: state.json, mode: jsonMode };
+                } else if (state.contentType === "htmlmixed") {
+                    return { state: state.htmlmixed, mode: htmlmixedMode };
+                } else if (state.contentType === "css") {
+                    return { state: state.css, mode: cssMode };
+                }
+            }
+        },
     };
 });
 
-CodeMirror.defineMode("http-json", function(config, parserConfig) {
-    const httpMode = CodeMirror.getMode(config, "http");
-    const simpleJsonMode = CodeMirror.getMode(config, "simple-json");
-  
-    return {
-      startState: function() {
-        return {
-          endHeaders: /\n\n|\n\r\n|\r\n\r\n/,
-          http: CodeMirror.startState(httpMode),
-          json: CodeMirror.startState(simpleJsonMode)
-        };
-      },
-      copyState: function(state) {
-        return {
-          inJson: state.inJson,
-          endHeaders: state.endHeaders,
-          http: CodeMirror.copyState(httpMode, state.http),
-          json: CodeMirror.copyState(simpleJsonMode, state.json)
-        };
-      },
-      token: function(stream, state) {
-        try{
-            JSON.parse(stream.string)
-            return simpleJsonMode.token(stream, state.json)
-        } catch(e) {
-            return httpMode.token(stream, state.http)
-        }
-      },
-      innerMode: function(state) {
-        return state.inJson ? {state: state.json, mode: simpleJsonMode} : {state: state.http, mode: httpMode};
-      }
-    };
-  });
-
 // CodeMirror
 const requestEditor = CodeMirror(document.getElementById("request-editor"), {
-    mode: "httpHeadersAndJson",
+    mode: "httpWithContentType",
     lineNumbers: true,
     lineWrapping: true,
     indentUnit: 4,
