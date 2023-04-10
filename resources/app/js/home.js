@@ -170,7 +170,6 @@ grids.on('focusChange', (ev) => {
             }
 
             responseEditor.setValue(resp)
-
         }
     })
 })
@@ -208,7 +207,6 @@ function Issue() {
         console.log(message)
         if (message) {
             responseEditor.setValue(atob(message.response))
-            
         }
     })
 }
@@ -219,27 +217,117 @@ window.addEventListener('keydown', function (event) {
     }
 });
 
-CodeMirror.defineMode('http-json', function (config) {
-    return CodeMirror.overlayMode(
-        CodeMirror.getMode(config, 'http'),
-        CodeMirror.getMode(config, { name: 'javascript', json: true }),
-        { opaque: true }
-    );
+CodeMirror.defineMode("simple-json", function () {
+    const keywords = {
+        "true": true, "false": true, "null": true
+    };
+
+    function tokenBase(stream, state) {
+        const ch = stream.peek();
+
+        if (ch === '"' || ch === "'") {
+            stream.next();
+            state.tokenize = tokenString(ch);
+            return state.tokenize(stream, state);
+        }
+        if (ch === '{' || ch === '[') {
+            stream.next();
+            state.depth++;
+            return 'bracket';
+        }
+        if (ch === '}' || ch === ']') {
+            stream.next();
+            state.depth--;
+            return 'bracket';
+        }
+        if (/\d/.test(ch)) {
+            stream.match(/^\d*(?:\.\d*)?(?:[eE][+\-]?\d+)?/);
+            return 'number';
+        }
+        if (stream.match(/^(?:true|false|null)/)) {
+            return 'keyword';
+        }
+        stream.next();
+        return null;
+    }
+
+    function tokenString(quote) {
+        return function (stream, state) {
+            let escaped = false, ch;
+
+            while ((ch = stream.next()) !== null) {
+                if (ch === quote && !escaped) {
+                    state.tokenize = tokenBase;
+                    break;
+                }
+                escaped = !escaped && ch === '\\';
+            }
+            return 'string';
+        };
+    }
+
+    return {
+        startState: function () {
+            return {
+                tokenize: tokenBase,
+                depth: 0,
+            };
+        },
+
+        token: function (stream, state) {
+            if (stream.eatSpace()) return null;
+            return state.tokenize(stream, state);
+        },
+
+        closeBrackets: { pairs: '()[]{}""' },
+        fold: 'brace'
+    };
 });
 
-CodeMirror.defineMIME('http-json', 'http-json');
+CodeMirror.defineMode("http-json", function(config, parserConfig) {
+    const httpMode = CodeMirror.getMode(config, "http");
+    const simpleJsonMode = CodeMirror.getMode(config, "simple-json");
+  
+    return {
+      startState: function() {
+        return {
+          endHeaders: /\n\n|\n\r\n|\r\n\r\n/,
+          http: CodeMirror.startState(httpMode),
+          json: CodeMirror.startState(simpleJsonMode)
+        };
+      },
+      copyState: function(state) {
+        return {
+          inJson: state.inJson,
+          endHeaders: state.endHeaders,
+          http: CodeMirror.copyState(httpMode, state.http),
+          json: CodeMirror.copyState(simpleJsonMode, state.json)
+        };
+      },
+      token: function(stream, state) {
+        try{
+            JSON.parse(stream.string)
+            return simpleJsonMode.token(stream, state.json)
+        } catch(e) {
+            return httpMode.token(stream, state.http)
+        }
+      },
+      innerMode: function(state) {
+        return state.inJson ? {state: state.json, mode: simpleJsonMode} : {state: state.http, mode: httpMode};
+      }
+    };
+  });
 
 // CodeMirror
 const requestEditor = CodeMirror(document.getElementById("request-editor"), {
-    mode: "http-json",
+    mode: "httpHeadersAndJson",
     lineNumbers: true,
     lineWrapping: true,
-    // indentUnit: 4,
+    indentUnit: 4,
     theme: "dracula",
     autoCloseBrackets: true,
     matchBrackets: true,
     styleActiveLine: true,
-    smartIndent: true,
     extraKeys: {
         'Ctrl-E': function (editor) {
             editor.replaceSelection(encodeURIComponent(editor.getSelection()))
@@ -254,7 +342,7 @@ const requestEditor = CodeMirror(document.getElementById("request-editor"), {
             editor.replaceSelection(atob(editor.getSelection()))
         }
     }
-});
+})
 
 const responseEditor = CodeMirror(document.getElementById("response-editor"), {
     mode: "http-json",
@@ -301,7 +389,7 @@ function stopResize() {
 
 document.addEventListener('astilectron-ready', function () {
     astilectron.onMessage(function (message) {
-        console.log(message)
+        // console.log(message)
         if (message && message.type === "proxy") {
             async function add() {
                 const item = {

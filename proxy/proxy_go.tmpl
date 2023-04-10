@@ -21,12 +21,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/valyala/fasthttp"
 )
 
 type contextKey struct {
@@ -112,14 +114,15 @@ func genCert(host string) {
 	certs[host] = out.Bytes()
 }
 
-func handleTunneling(w http.ResponseWriter, r *http.Request) {
-	host := strings.Split(r.Host, ":")[0]
+func handleTunneling(ctx *fasthttp.RequestCtx) {
+	ctxHost := string(ctx.Host())
+	host := strings.Split(ctxHost, ":")[0]
 	fmt.Println("Tunneling:", host)
 
-	dest_conn, err := tls.Dial("tcp", r.Host, &tls.Config{InsecureSkipVerify: true})
+	dest_conn, err := tls.Dial("tcp", ctxHost, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
 		clog("tls.Dial: " + err.Error())
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		ctx.Error(err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 
@@ -133,21 +136,12 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 	}
 	config := tls.Config{Certificates: []tls.Certificate{cert}}
 
-	w.WriteHeader(http.StatusOK)
+	ctx.SetStatusCode(http.StatusOK)
 
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
-		return
-	}
-	hijacker.Hijack()
+	ctx.Hijack(func(server net.Conn) {
+		client_conn := tls.Server(server, &config)
+		client_conn.Handshake()
 
-	server := GetConn(r)
-	client_conn := tls.Server(server, &config)
-
-	client_conn.Handshake()
-
-	go func() {
 		defer dest_conn.Close()
 		defer client_conn.Close()
 
@@ -254,7 +248,7 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			hostname := r.URL.Hostname()
+			hostname := string(ctx.Host())
 			history := ProxyHistory{
 				ServerIp:       hostname,
 				TLS:            true,
@@ -271,7 +265,7 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 			historyMutex.Unlock()
 			callback(history)
 		}
-	}()
+	})
 }
 
 func logRequest(req *http.Request) []byte {
@@ -313,18 +307,18 @@ func DecodeBody(encodedBody io.ReadCloser, encoding string) (io.ReadCloser, erro
 	}
 }
 
-func handleHTTP(w http.ResponseWriter, req *http.Request) {
-	resp, err := http.DefaultTransport.RoundTrip(req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+func handleHTTP(ctx *fasthttp.RequestCtx) {
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
+
+	if err := fasthttp.Do(&ctx.Request, resp); err != nil {
+		ctx.Error(err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	defer resp.Body.Close()
 
-	// res, _ := http.ReadResponse(bufio.NewReader(strings.NewReader(buf2.String())), req)
-	body, _ := io.ReadAll(resp.Body)
+	body := resp.Body()
 
-	contentEncoding := resp.Header.Get("Content-Encoding")
+	contentEncoding := string(resp.Header.Peek("Content-Encoding"))
 	if contentEncoding != "" {
 		clog(contentEncoding)
 		contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
@@ -347,25 +341,31 @@ func handleHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	delete(resp.Header, "Transfer-Encoding")
-	delete(resp.Header, "Content-Encoding")
+	resp.Header.Del("Transfer-Encoding")
+	resp.Header.Del("Content-Encoding")
 	resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
 
-	newResponse := &http.Response{
-		Status:           resp.Status,
-		StatusCode:       resp.StatusCode,
-		Proto:            resp.Proto,
-		ProtoMajor:       resp.ProtoMajor,
-		ProtoMinor:       resp.ProtoMinor,
-		Header:           resp.Header,
-		Body:             ioutil.NopCloser(bytes.NewReader(body)),
-		ContentLength:    int64(len(body)),
-		TransferEncoding: nil,
-		Close:            false,
-		Uncompressed:     true,
-		Request:          resp.Request,
-		TLS:              resp.TLS,
+	newResponse := &http.Response{}
+	newResponse.StatusCode = resp.StatusCode()
+	newResponse.Header = http.Header{}
+	resp.Header.VisitAll(func(key, value []byte) {
+		newResponse.Header.Add(string(key), string(value))
+	})
+	newResponse.Body = ioutil.NopCloser(bytes.NewReader(resp.Body()))
+
+	req := &http.Request{}
+	req.Method = string(ctx.Request.Header.Method())
+	req.URL = &url.URL{
+		Scheme: string(ctx.Request.URI().Scheme()),
+		Host:   string(ctx.Request.URI().Host()),
+		Path:   string(ctx.Request.URI().Path()),
 	}
+	req.Proto = string(ctx.Request.Header.Protocol())
+	req.Header = http.Header{}
+	ctx.Request.Header.VisitAll(func(key, value []byte) {
+		req.Header.Add(string(key), string(value))
+	})
+	req.Body = ioutil.NopCloser(bytes.NewReader(ctx.Request.Body()))
 
 	rawRaw := logRequest(req)
 	rawRes := logResponse(newResponse)
@@ -386,19 +386,13 @@ func handleHTTP(w http.ResponseWriter, req *http.Request) {
 	callback(curhis)
 	historyMutex.Unlock()
 
-	log.Println(req.RemoteAddr, " ", resp.Status)
+	log.Println(req.RemoteAddr, " ", resp.StatusCode())
 
-	copyHeader(w.Header(), newResponse.Header)
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, newResponse.Body)
-}
-
-func copyHeader(dst, src http.Header) {
-	for k, vv := range src {
-		for _, v := range vv {
-			dst.Set(k, v)
-		}
-	}
+	ctx.Response.SetStatusCode(resp.StatusCode())
+	resp.Header.VisitAll(func(key, value []byte) {
+		ctx.Response.Header.SetBytesKV(key, value)
+	})
+	ctx.Response.SetBody(resp.Body())
 }
 
 func init() {
@@ -411,19 +405,11 @@ func RunProxy(addr string, cb func(ProxyHistory), flog func(string)) {
 	callback = cb
 	clog = flog
 
-	server := &http.Server{
-		Addr: addr,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodConnect {
-				handleTunneling(w, r)
-			} else {
-				handleHTTP(w, r)
-			}
-		}),
-		ConnContext: SaveConnInContext,
-		// Disable HTTP/2.
-		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
-	}
-
-	log.Fatal(server.ListenAndServe())
+	fasthttp.ListenAndServe(":9505", func(ctx *fasthttp.RequestCtx) {
+		if string(ctx.Method()) == http.MethodConnect {
+			handleTunneling(ctx)
+		} else {
+			handleHTTP(ctx)
+		}
+	})
 }
