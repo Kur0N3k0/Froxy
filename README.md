@@ -45,3 +45,6 @@ Ctrl + Shift + E: Selection URL decoding (encodeURIComponent)
 - [ ] Socks5 Support
 - [ ] Websocket Support
 - [ ] HTTP/2 Support
+- [ ] Raw TCP Support
+- [ ] Encode/Encrypted TCP Packet Plugin(javscript)
+- [ ] Hex Editor
