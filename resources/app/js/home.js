@@ -330,7 +330,7 @@ const requestEditor = CodeMirror(document.getElementById("request-editor"), {
 })
 
 const responseEditor = CodeMirror(document.getElementById("response-editor"), {
-    mode: "http-json",
+    mode: "httpWithContentType",
     lineNumbers: true,
     lineWrapping: true,
     indentUnit: 4,
