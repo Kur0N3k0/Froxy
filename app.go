@@ -122,7 +122,7 @@ func main() {
 			})
 
 			go func() {
-				go proxy.RunProxy(":9999", func(history proxy.ProxyHistory) {
+				go proxy.RunProxy(":9505", func(history proxy.ProxyHistory) {
 					w.SendMessage(map[string]interface{}{
 						"type":   "proxy",
 						"host":   history.RequestHost,
@@ -194,7 +194,7 @@ func main() {
 						nreq.Header = req.Header.Clone()
 						nreq.Header.Set("Content-Length", strconv.Itoa(len(tbody)))
 
-						kProxyUrl, _ := url.Parse("http://127.0.0.1:9999")
+						kProxyUrl, _ := url.Parse("http://127.0.0.1:9505")
 						client := &http.Client{
 							Transport: &http.Transport{
 								DisableCompression: true,

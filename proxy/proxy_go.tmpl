@@ -71,7 +71,7 @@ func genCert(host string) {
 	certKeyPem, _ := pem.Decode(root.certkey)
 	certKey, err := x509.ParsePKCS8PrivateKey(certKeyPem.Bytes)
 	if err != nil {
-		fmt.Println(err.Error())
+		clog("ParsePKCS8PrivateKey: " + err.Error())
 	}
 
 	clientCert := x509.Certificate{
@@ -90,18 +90,19 @@ func genCert(host string) {
 	block, _ := pem.Decode(root.cacrt)
 	caCert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		fmt.Println("ParseCertificate Failure")
+		clog("ParseCertificate: " + err.Error())
+		clog("ParseCertificate Failure")
 		return
 	}
 
 	caKeyPem, _ := pem.Decode(root.cakey)
 	caKey, err := x509.ParsePKCS8PrivateKey(caKeyPem.Bytes)
 	if err != nil {
-		fmt.Println(err.Error())
+		clog("ParsePKCS8PrivateKey: " + err.Error())
 	}
 	cert, err := x509.CreateCertificate(rand.Reader, &clientCert, caCert, certKey.(*rsa.PrivateKey).Public(), caKey)
 	if err != nil {
-		fmt.Println(err.Error())
+		clog("CreateCertificate: " + err.Error())
 		fmt.Println("CreateCertificate Failure")
 		return
 	}
@@ -115,8 +116,9 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 	host := strings.Split(r.Host, ":")[0]
 	fmt.Println("Tunneling:", host)
 
-	dest_conn, err := tls.Dial("tcp", r.Host, &tls.Config{})
+	dest_conn, err := tls.Dial("tcp", r.Host, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
+		clog("tls.Dial: " + err.Error())
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -127,7 +129,7 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 
 	cert, err := tls.X509KeyPair(certs[host], root.certkey)
 	if err != nil {
-		log.Fatalf("server: loadkeys: %s", err)
+		clog("server: loadkeys: " + err.Error())
 	}
 	config := tls.Config{Certificates: []tls.Certificate{cert}}
 
@@ -142,10 +144,6 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 
 	server := GetConn(r)
 	client_conn := tls.Server(server, &config)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-	}
 
 	client_conn.Handshake()
 
@@ -375,7 +373,7 @@ func copyHeader(dst, src http.Header) {
 func init() {
 	root.cacrt = []byte(`__CA_CRT__`)
 	root.cakey = []byte(`__CA_KEY__`)
-    root.certkey = []byte(`__CERT_KEY__`)
+	root.certkey = []byte(`__CERT_KEY__`)
 }
 
 func RunProxy(addr string, cb func(ProxyHistory), flog func(string)) {
