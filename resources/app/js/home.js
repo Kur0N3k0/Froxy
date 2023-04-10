@@ -298,19 +298,23 @@ document.addEventListener('astilectron-ready', function () {
     astilectron.onMessage(function (message) {
         console.log(message)
         if (message && message.type === "proxy") {
-            const item = {
-                '#': grids.getRowCount() + 1,
-                Host: message.host,
-                Status: message.status,
-                Method: message.method,
-                URL: message.url,
-                Length: message.length
+            async function add() {
+                const item = {
+                    '#': grids.getRowCount() + 1,
+                    Host: message.host,
+                    Status: message.status,
+                    Method: message.method,
+                    URL: message.url,
+                    Length: message.length
+                }
+                grids.appendRow(item)
+                grids.setSelectionRange({
+                    start: [grids.getRowCount() - current - 1, 0],
+                    end: [grids.getRowCount() - current - 1, 5]
+                })
             }
-            grids.appendRow(item)
-            grids.setSelectionRange({
-                start: [grids.getRowCount() - current - 1, 0],
-                end: [grids.getRowCount() - current - 1, 5]
-            })
+
+            add()
         }
     })
 })
