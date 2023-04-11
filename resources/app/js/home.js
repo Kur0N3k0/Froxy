@@ -249,7 +249,7 @@ CodeMirror.defineMode("httpWithContentType", function (config, parserConfig) {
             if (!state.inBody) {
                 const token = httpMode.token(stream, state.http);
                 if (token === "string" && stream.string.includes("Content-Type")) {
-                    if (stream.string.includes("application/json")) {
+                    if (stream.string.includes("application/json") || stream.string.includes("javascript")) {
                         state.contentType = "json";
                     } else if (stream.string.includes("html") || stream.string.includes("xml")) {
                         state.contentType = "htmlmixed";
@@ -274,13 +274,10 @@ CodeMirror.defineMode("httpWithContentType", function (config, parserConfig) {
 
             if (state.inBody) {
                 if (state.contentType === "json") {
-                    console.log("json")
                     return jsonMode.token(stream, state.json);
                 } else if (state.contentType === "htmlmixed") {
-                    console.log("htmlmixed")
                     return htmlmixedMode.token(stream, state.htmlmixed);
                 } else if (state.contentType === "css") {
-                    console.log("css~")
                     return cssMode.token(stream, state.css)
                 }
             }
@@ -374,7 +371,7 @@ function stopResize() {
 
 document.addEventListener('astilectron-ready', function () {
     astilectron.onMessage(function (message) {
-        // console.log(message)
+        console.log(message)
         if (message && message.type === "proxy") {
             async function add() {
                 const item = {

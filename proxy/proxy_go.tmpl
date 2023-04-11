@@ -3,9 +3,6 @@ package proxy
 import (
 	"bufio"
 	"bytes"
-	"compress/flate"
-	"compress/gzip"
-	"compress/zlib"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -114,6 +111,61 @@ func genCert(host string) {
 	certs[host] = out.Bytes()
 }
 
+func fasthttpRequestToHTTPRequest(req *fasthttp.Request) (*http.Request, error) {
+	u := url.URL{
+		Scheme:   string(req.URI().Scheme()),
+		Host:     string(req.URI().Host()),
+		Path:     string(req.URI().Path()),
+		RawQuery: string(req.URI().QueryString()),
+	}
+
+	body := bytes.NewReader(req.Body())
+	httpReq, err := http.NewRequest(string(req.Header.Method()), u.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.VisitAll(func(key, value []byte) {
+		httpReq.Header.Set(string(key), string(value))
+	})
+
+	return httpReq, nil
+}
+
+func fasthttpResponseToHTTPResponse(resp *fasthttp.Response) (*http.Response, error) {
+	httpResp := &http.Response{
+		Status:     string(resp.Header.StatusMessage()),
+		StatusCode: resp.StatusCode(),
+		Header:     make(http.Header),
+		Body:       ioutil.NopCloser(bytes.NewReader(resp.Body())),
+	}
+
+	resp.Header.VisitAll(func(key, value []byte) {
+		httpResp.Header.Set(string(key), string(value))
+	})
+
+	httpResp.Proto = string(resp.Header.Protocol())
+
+	proto := string(resp.Header.Protocol())
+	parts := strings.SplitN(string(proto), "/", 2)
+	if len(parts) == 2 {
+		httpResp.Proto = parts[1]
+		majMin := strings.SplitN(parts[1], ".", 2)
+		if len(majMin) == 2 {
+			major, err := strconv.Atoi(majMin[0])
+			if err == nil {
+				httpResp.ProtoMajor = major
+			}
+			minor, err := strconv.Atoi(majMin[1])
+			if err == nil {
+				httpResp.ProtoMinor = minor
+			}
+		}
+	}
+
+	return httpResp, nil
+}
+
 func handleTunneling(ctx *fasthttp.RequestCtx) {
 	ctxHost := string(ctx.Host())
 	host := strings.Split(ctxHost, ":")[0]
@@ -159,24 +211,7 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 			contentEncoding := req.Header.Get("Content-Encoding")
 			if contentEncoding != "" {
 				clog(contentEncoding)
-				contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
-				encodedBody := ioutil.NopCloser(bytes.NewReader(body))
-				encodings := strings.Split(contentEncoding, ",")
-				for _, encoding := range encodings {
-					decodedBody, err := DecodeBody(encodedBody, strings.TrimSpace(encoding))
-					if err != nil {
-						fmt.Printf("Error decoding body: %v\n", err)
-						break
-					}
-					defer decodedBody.Close()
-
-					body, err = ioutil.ReadAll(decodedBody)
-					if err != nil {
-						fmt.Printf("Error reading decoded body: %v\n", err)
-						break
-					}
-					encodedBody = ioutil.NopCloser(bytes.NewReader(body))
-				}
+				body = DecodeBodyAll(contentEncoding, body)
 			}
 
 			delete(req.Header, "Transfer-Encoding")
@@ -201,24 +236,7 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 			contentEncoding = res.Header.Get("Content-Encoding")
 			if contentEncoding != "" {
 				clog(contentEncoding)
-				contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
-				encodedBody := ioutil.NopCloser(bytes.NewReader(body))
-				encodings := strings.Split(contentEncoding, ",")
-				for _, encoding := range encodings {
-					decodedBody, err := DecodeBody(encodedBody, strings.TrimSpace(encoding))
-					if err != nil {
-						fmt.Printf("Error decoding body: %v\n", err)
-						break
-					}
-					defer decodedBody.Close()
-
-					body, err = ioutil.ReadAll(decodedBody)
-					if err != nil {
-						fmt.Printf("Error reading decoded body: %v\n", err)
-						break
-					}
-					encodedBody = ioutil.NopCloser(bytes.NewReader(body))
-				}
+				body = DecodeBodyAll(contentEncoding, body)
 			}
 
 			delete(res.Header, "Transfer-Encoding")
@@ -292,16 +310,32 @@ func logResponse(res *http.Response) []byte {
 	return dump
 }
 
-func DecodeBody(encodedBody io.ReadCloser, encoding string) (io.ReadCloser, error) {
+func DecodeBodyAll(contentEncoding string, body []byte) []byte {
+	contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
+	// encodedBody := ioutil.NopCloser(bytes.NewReader(body))
+	encodings := strings.Split(contentEncoding, ",")
+	for _, encoding := range encodings {
+		result, err := DecodeBody(body, strings.TrimSpace(encoding))
+		if err != nil {
+			clog("Error decoding body: " + err.Error())
+			break
+		}
+		body = result
+	}
+	return body
+}
+
+func DecodeBody(body []byte, encoding string) ([]byte, error) {
 	switch encoding {
 	case "gzip":
-		return gzip.NewReader(encodedBody)
+		// return gzip.NewReader(encodedBody)
+		return fasthttp.AppendGunzipBytes(nil, body)
 	case "deflate":
-		return flate.NewReader(encodedBody), nil
-	case "zlib":
-		return zlib.NewReader(encodedBody)
+		// return flate.NewReader(encodedBody), nil
+		return fasthttp.AppendInflateBytes(nil, body)
 	case "br":
-		return ioutil.NopCloser(brotli.NewReader(encodedBody)), nil
+		reader := brotli.NewReader(bytes.NewReader(body))
+		return ioutil.ReadAll(reader)
 	default:
 		return nil, fmt.Errorf("unsupported content encoding: %s", encoding)
 	}
@@ -316,69 +350,49 @@ func handleHTTP(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	body := resp.Body()
-
-	contentEncoding := string(resp.Header.Peek("Content-Encoding"))
+	contentEncoding := string(ctx.Request.Header.ContentEncoding())
 	if contentEncoding != "" {
 		clog(contentEncoding)
-		contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
-		encodedBody := ioutil.NopCloser(bytes.NewReader(body))
-		encodings := strings.Split(contentEncoding, ",")
-		for _, encoding := range encodings {
-			decodedBody, err := DecodeBody(encodedBody, strings.TrimSpace(encoding))
-			if err != nil {
-				clog("Error decoding body: " + err.Error())
-				break
-			}
-			defer decodedBody.Close()
+		result := DecodeBodyAll(contentEncoding, ctx.Request.Body())
+		ctx.Request.SetBody(result)
+		ctx.Request.Header.SetContentLength(len(result))
+	}
 
-			body, err = ioutil.ReadAll(decodedBody)
-			if err != nil {
-				clog("Error reading decoded body: " + err.Error())
-				break
-			}
-			encodedBody = ioutil.NopCloser(bytes.NewReader(body))
-		}
+	req, err := fasthttpRequestToHTTPRequest(&ctx.Request)
+	if err != nil {
+		clog(err.Error())
+	}
+
+	body := resp.Body()
+
+	contentEncoding = string(resp.Header.Peek("Content-Encoding"))
+	if contentEncoding != "" {
+		clog(contentEncoding)
+		body = DecodeBodyAll(contentEncoding, body)
 	}
 
 	resp.Header.Del("Transfer-Encoding")
 	resp.Header.Del("Content-Encoding")
 	resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	resp.SetBody(body)
 
-	newResponse := &http.Response{}
-	newResponse.StatusCode = resp.StatusCode()
-	newResponse.Header = http.Header{}
-	resp.Header.VisitAll(func(key, value []byte) {
-		newResponse.Header.Add(string(key), string(value))
-	})
-	newResponse.Body = ioutil.NopCloser(bytes.NewReader(resp.Body()))
-
-	req := &http.Request{}
-	req.Method = string(ctx.Request.Header.Method())
-	req.URL = &url.URL{
-		Scheme: string(ctx.Request.URI().Scheme()),
-		Host:   string(ctx.Request.URI().Host()),
-		Path:   string(ctx.Request.URI().Path()),
+	newResponse, err := fasthttpResponseToHTTPResponse(resp)
+	if err != nil {
+		clog(err.Error())
 	}
-	req.Proto = string(ctx.Request.Header.Protocol())
-	req.Header = http.Header{}
-	ctx.Request.Header.VisitAll(func(key, value []byte) {
-		req.Header.Add(string(key), string(value))
-	})
-	req.Body = ioutil.NopCloser(bytes.NewReader(ctx.Request.Body()))
 
-	rawRaw := logRequest(req)
+	rawReq := logRequest(req)
 	rawRes := logResponse(newResponse)
 
 	curhis := ProxyHistory{
-		ServerIp:       req.Host,
+		ServerIp:       string(ctx.Host()),
 		TLS:            false,
-		RequestMethod:  req.Method,
-		RequestHost:    req.Host,
-		RequestURL:     req.URL.RequestURI(),
+		RequestMethod:  string(ctx.Method()),
+		RequestHost:    string(ctx.Host()),
+		RequestURL:     ctx.URI().String(),
 		ResponseLength: int64(len(body)),
 		ResponseStatus: newResponse.StatusCode,
-		RawRequest:     rawRaw,
+		RawRequest:     rawReq,
 		RawResponse:    rawRes,
 	}
 	historyMutex.Lock()
@@ -389,6 +403,7 @@ func handleHTTP(ctx *fasthttp.RequestCtx) {
 	log.Println(req.RemoteAddr, " ", resp.StatusCode())
 
 	ctx.Response.SetStatusCode(resp.StatusCode())
+	ctx.Response.Header.SetProtocol(resp.Header.Protocol())
 	resp.Header.VisitAll(func(key, value []byte) {
 		ctx.Response.Header.SetBytesKV(key, value)
 	})

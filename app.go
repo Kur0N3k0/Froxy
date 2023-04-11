@@ -213,24 +213,10 @@ func main() {
 
 						bbody, _ := ioutil.ReadAll(res.Body)
 
-						encodedBody := ioutil.NopCloser(bytes.NewReader(bbody))
 						contentEncoding := res.Header.Get("Content-Encoding")
 						var body []byte = bbody
 						if contentEncoding != "" {
-							encodings := strings.Split(contentEncoding, ",")
-							for _, encoding := range encodings {
-								decodedBody, err := proxy.DecodeBody(encodedBody, strings.TrimSpace(encoding))
-								if err != nil {
-									return fmt.Sprintf("Error decoding body: %v\n", err)
-								}
-								defer decodedBody.Close()
-
-								body, err = ioutil.ReadAll(decodedBody)
-								if err != nil {
-									return fmt.Sprintf("Error reading decoded body: %v\n", err)
-								}
-								encodedBody = ioutil.NopCloser(bytes.NewReader(body))
-							}
+							body = proxy.DecodeBodyAll(contentEncoding, body)
 						}
 
 						delete(res.Header, "Transfer-Encoding")
