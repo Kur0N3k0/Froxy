@@ -11,7 +11,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -134,10 +133,11 @@ func fasthttpRequestToHTTPRequest(req *fasthttp.Request) (*http.Request, error) 
 
 func fasthttpResponseToHTTPResponse(resp *fasthttp.Response) (*http.Response, error) {
 	httpResp := &http.Response{
-		Status:     string(resp.Header.StatusMessage()),
-		StatusCode: resp.StatusCode(),
-		Header:     make(http.Header),
-		Body:       ioutil.NopCloser(bytes.NewReader(resp.Body())),
+		Status:        string(resp.Header.StatusMessage()),
+		StatusCode:    resp.StatusCode(),
+		Header:        make(http.Header),
+		Body:          ioutil.NopCloser(bytes.NewReader(resp.Body())),
+		ContentLength: int64(resp.Header.ContentLength()),
 	}
 
 	resp.Header.VisitAll(func(key, value []byte) {
@@ -198,71 +198,74 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 		defer client_conn.Close()
 
 		clientReader := bufio.NewReader(client_conn)
+		//clientWriter := bufio.NewWriter(client_conn)
+		destReader := bufio.NewReader(dest_conn)
+		//destWriter := bufio.NewWriter(dest_conn)
+
 		for {
-			req, err := http.ReadRequest(clientReader)
-			if err == io.EOF {
-				break
-			} else if err != nil {
+			req := fasthttp.AcquireRequest()
+			defer fasthttp.ReleaseRequest(req)
+
+			err := req.Read(clientReader)
+			if err != nil {
 				clog("Error reading from client: " + err.Error())
 				return
 			}
 
-			body, _ := ioutil.ReadAll(req.Body)
-			contentEncoding := req.Header.Get("Content-Encoding")
+			body := req.Body()
+			contentEncoding := string(req.Header.ContentEncoding())
 			if contentEncoding != "" {
 				clog(contentEncoding)
 				body = DecodeBodyAll(contentEncoding, body)
 			}
 
-			delete(req.Header, "Transfer-Encoding")
-			delete(req.Header, "Content-Encoding")
+			req.Header.Del("Transfer-Encoding")
+			req.Header.Del("Content-Encoding")
 
-			req.Body = ioutil.NopCloser(bytes.NewReader(body))
-			req.ContentLength = int64(len(body))
-			rawReq := logRequest(req)
+			req.SetBody(body)
+			req.Header.SetContentLength(len(body))
+			hreq, err := fasthttpRequestToHTTPRequest(req)
+			if err != nil {
+				clog("fasthttpRequestToHTTPRequest: " + err.Error())
+			}
+			rawReq := logRequest(hreq)
 
-			if err := req.Write(dest_conn); err != nil {
+			if err := hreq.Write(dest_conn); err != nil {
 				clog("Error forwarding request to destination: " + err.Error())
 				return
 			}
 
-			res, err := http.ReadResponse(bufio.NewReader(dest_conn), req)
+			res := fasthttp.AcquireResponse()
+			defer fasthttp.ReleaseResponse(res)
+
+			err = res.Read(destReader)
 			if err != nil {
-				clog("Error reading response from destination: %v" + err.Error())
-				return
+				clog("Error reading from server: " + err.Error())
 			}
 
-			body, _ = ioutil.ReadAll(res.Body)
-			contentEncoding = res.Header.Get("Content-Encoding")
+			clog("yeah - 2")
+			body = res.Body()
+
+			contentEncoding = string(res.Header.ContentEncoding())
 			if contentEncoding != "" {
 				clog(contentEncoding)
 				body = DecodeBodyAll(contentEncoding, body)
 			}
 
-			delete(res.Header, "Transfer-Encoding")
-			delete(res.Header, "Content-Encoding")
+			res.Header.Del("Transfer-Encoding")
+			res.Header.Del("Content-Encoding")
 
-			newResponse := &http.Response{
-				Status:           res.Status,
-				StatusCode:       res.StatusCode,
-				Proto:            res.Proto,
-				ProtoMajor:       res.ProtoMajor,
-				ProtoMinor:       res.ProtoMinor,
-				Header:           res.Header.Clone(),
-				Body:             ioutil.NopCloser(bytes.NewReader(body)),
-				ContentLength:    int64(len(body)),
-				TransferEncoding: nil,
-				Close:            false,
-				Uncompressed:     true,
-				Request:          res.Request,
-				TLS:              res.TLS,
+			res.SetBody(body)
+			res.Header.SetContentLength(len(body))
+
+			hres, err := fasthttpResponseToHTTPResponse(res)
+			if err != nil {
+				clog("fasthttpResponseToHTTPResponse: " + err.Error())
 			}
-			res.Body = ioutil.NopCloser(bytes.NewReader(body))
-			res.ContentLength = int64(len(body))
 
-			rawRes := logResponse(newResponse)
-			if err := newResponse.Write(client_conn); err != nil {
-				log.Printf("Error forwarding response to client: %v", err)
+			rawRes := logResponse(hres)
+			if err := hres.Write(client_conn); err != nil {
+				clog("Error forwarding response to client: " + err.Error())
 				return
 			}
 
@@ -270,11 +273,11 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 			history := ProxyHistory{
 				ServerIp:       hostname,
 				TLS:            true,
-				RequestMethod:  req.Method,
+				RequestMethod:  hreq.Method,
 				RequestHost:    hostname,
-				RequestURL:     req.URL.RequestURI(),
-				ResponseLength: newResponse.ContentLength,
-				ResponseStatus: newResponse.StatusCode,
+				RequestURL:     hreq.URL.RequestURI(),
+				ResponseLength: hres.ContentLength,
+				ResponseStatus: hres.StatusCode,
 				RawRequest:     rawReq,
 				RawResponse:    rawRes,
 			}
@@ -312,7 +315,6 @@ func logResponse(res *http.Response) []byte {
 
 func DecodeBodyAll(contentEncoding string, body []byte) []byte {
 	contentEncoding = strings.ReplaceAll(contentEncoding, " ", "")
-	// encodedBody := ioutil.NopCloser(bytes.NewReader(body))
 	encodings := strings.Split(contentEncoding, ",")
 	for _, encoding := range encodings {
 		result, err := DecodeBody(body, strings.TrimSpace(encoding))
@@ -328,10 +330,8 @@ func DecodeBodyAll(contentEncoding string, body []byte) []byte {
 func DecodeBody(body []byte, encoding string) ([]byte, error) {
 	switch encoding {
 	case "gzip":
-		// return gzip.NewReader(encodedBody)
 		return fasthttp.AppendGunzipBytes(nil, body)
 	case "deflate":
-		// return flate.NewReader(encodedBody), nil
 		return fasthttp.AppendInflateBytes(nil, body)
 	case "br":
 		reader := brotli.NewReader(bytes.NewReader(body))
