@@ -132,12 +132,19 @@ func fasthttpRequestToHTTPRequest(req *fasthttp.Request) (*http.Request, error) 
 }
 
 func fasthttpResponseToHTTPResponse(resp *fasthttp.Response) (*http.Response, error) {
+	contentLength := int64(0)
+	if resp.Header.ContentLength() > 0 {
+		contentLength = int64(resp.Header.ContentLength())
+	}
 	httpResp := &http.Response{
-		Status:        string(resp.Header.StatusMessage()),
-		StatusCode:    resp.StatusCode(),
-		Header:        make(http.Header),
-		Body:          ioutil.NopCloser(bytes.NewReader(resp.Body())),
-		ContentLength: int64(resp.Header.ContentLength()),
+		Status:           string(resp.Header.StatusMessage()),
+		StatusCode:       resp.StatusCode(),
+		Header:           make(http.Header),
+		Body:             ioutil.NopCloser(bytes.NewReader(resp.Body())),
+		ContentLength:    contentLength,
+		TransferEncoding: nil,
+		Close:            false,
+		Uncompressed:     true,
 	}
 
 	resp.Header.VisitAll(func(key, value []byte) {
@@ -198,9 +205,7 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 		defer client_conn.Close()
 
 		clientReader := bufio.NewReader(client_conn)
-		//clientWriter := bufio.NewWriter(client_conn)
 		destReader := bufio.NewReader(dest_conn)
-		//destWriter := bufio.NewWriter(dest_conn)
 
 		for {
 			req := fasthttp.AcquireRequest()
