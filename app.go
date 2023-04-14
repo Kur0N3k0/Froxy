@@ -1,61 +1,12 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
-	"crypto/tls"
-	"flag"
 	"fmt"
 	"froxy/proxy"
-	"io/ioutil"
-	"net/http"
-	"net/url"
-	"os"
-	"strconv"
-	"strings"
 
 	"github.com/asticode/go-astikit"
 	"github.com/asticode/go-astilectron"
 	bootstrap "github.com/asticode/go-astilectron-bootstrap"
-)
-
-var (
-	AppName            string
-	BuiltAt            string
-	VersionAstilectron string
-	VersionElectron    string
-)
-
-var (
-	fs     = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	debug  = fs.Bool("d", false, "enables the debug mode")
-	w      *astilectron.Window
-	app    *astilectron.Astilectron
-	winMgr = map[string]*astilectron.Window{}
-)
-
-type MessageType struct {
-	MsgType string `json:"type"`
-}
-
-type MessageHistoryType struct {
-	Idx int `json:"idx"`
-}
-
-type MessageIssueType struct {
-	Idx     int    `json:"idx"`
-	Request string `json:"request"`
-	// Response string `json:"response"`
-}
-
-const (
-	MSG_HISTORY = "history"
-	MSG_ISSUE   = "issue"
-)
-
-const (
-	WIN_MAIN   = "main"
-	WIN_FILTER = "filter"
 )
 
 func main() {
@@ -146,107 +97,16 @@ func main() {
 
 					switch msgType.MsgType {
 					case MSG_HISTORY:
-						var hisType MessageHistoryType
-						m.Unmarshal(&hisType)
-						if hisType.Idx < 0 || len(proxy.History) <= hisType.Idx {
-							return map[string]interface{}{
-								"type": "error",
-							}
-						}
-						return map[string]interface{}{
-							"type":     "history",
-							"request":  proxy.History[hisType.Idx].RawRequest,
-							"response": proxy.History[hisType.Idx].RawResponse,
-						}
+						return handleHistory(m)
 					case MSG_ISSUE:
-						var issType MessageIssueType
-						m.Unmarshal(&issType)
-						if issType.Idx < 0 || len(proxy.History) <= issType.Idx {
-							return map[string]interface{}{
-								"type": "error",
-							}
-						}
-
-						w.SendMessage(proxy.History[issType.Idx].ServerIp)
-						w.SendMessage(issType.Request)
-						req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(issType.Request)))
-						if err != nil {
-							return "ReadRequest " + err.Error()
-						}
-						w.SendMessage(fmt.Sprintf("%v", req))
-						// scheme := "http://"
-						req.URL.Host = proxy.History[issType.Idx].ServerIp
-						req.URL.Scheme = "http"
-						if proxy.History[issType.Idx].TLS {
-							// scheme = "https://"
-							req.URL.Scheme = "https"
-						}
-
-						tbody, err := ioutil.ReadAll(req.Body)
-						if err != nil {
-							w.SendMessage(err.Error())
-						}
-						nreq, err := http.NewRequest(req.Method, req.URL.String(), bytes.NewReader(tbody))
-						if err != nil {
-							return "NewRequest " + err.Error()
-						}
-						nreq.Proto = req.Proto
-						nreq.Header = req.Header.Clone()
-						nreq.Header.Set("Content-Length", strconv.Itoa(len(tbody)))
-
-						kProxyUrl, _ := url.Parse("http://127.0.0.1:9505")
-						client := &http.Client{
-							Transport: &http.Transport{
-								DisableCompression: true,
-								Proxy:              http.ProxyURL(kProxyUrl),
-								TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
-							},
-							CheckRedirect: func(req *http.Request, via []*http.Request) error {
-								return http.ErrUseLastResponse
-							},
-						}
-						res, err := client.Do(nreq)
-						if err != nil {
-							return "Do " + err.Error()
-						}
-						defer res.Body.Close()
-
-						bbody, _ := ioutil.ReadAll(res.Body)
-
-						contentEncoding := res.Header.Get("Content-Encoding")
-						var body []byte = bbody
-						if contentEncoding != "" {
-							body = proxy.DecodeBodyAll(contentEncoding, body)
-						}
-
-						delete(res.Header, "Transfer-Encoding")
-						delete(res.Header, "Content-Encoding")
-
-						newResponse := &http.Response{
-							Status:           res.Status,
-							StatusCode:       res.StatusCode,
-							Proto:            res.Proto,
-							ProtoMajor:       res.ProtoMajor,
-							ProtoMinor:       res.ProtoMinor,
-							Header:           res.Header,
-							Body:             ioutil.NopCloser(bytes.NewReader(body)),
-							ContentLength:    int64(len(body)),
-							TransferEncoding: nil,
-							Close:            false,
-							Uncompressed:     true,
-							Request:          res.Request,
-							TLS:              res.TLS,
-						}
-
-						var bres bytes.Buffer
-						writer := bufio.NewWriter(&bres)
-						newResponse.Write(writer)
-						writer.Flush()
-
-						return map[string]interface{}{
-							"type":     "issue",
-							"response": bres.Bytes(),
-						}
+						return handleIssue(m)
+					case MSG_ADD_MATCH_REPLACE:
+						return handleAddMatchReplace(m)
+					case MSG_ENABLE_MATCH_REPLACE:
+					case MSG_DISABLE_MATCH_REPLACE:
+						return handleStatusMatchReplace(m)
+					case MSG_DELETE_MATCH_REPLACE:
+						return handleDeleteMatchReplace(m)
 					}
 					return nil
 				})
