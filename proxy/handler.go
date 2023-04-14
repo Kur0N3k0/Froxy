@@ -100,7 +100,17 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 				req.Header.SetContentLength(len(body))
 			}
 
-			ReplaceMatchedRequest(req)
+			// remove req header hop-by-hop
+			req.Header.Del("Connection")
+			req.Header.Del("Keep-Alive")
+			req.Header.Del("Proxy-Authenticate")
+			req.Header.Del("Proxy-Authorization")
+			req.Header.Del("TE")
+			req.Header.Del("Trailers")
+			req.Header.Del("Transfer-Encoding")
+			req.Header.Del("Upgrade")
+
+			// ReplaceMatchedRequest(req)
 			hreq, err := fasthttpRequestToHTTPRequest(req)
 			if err != nil {
 				clog("fasthttpRequestToHTTPRequest: " + err.Error())
@@ -108,7 +118,7 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 			}
 
 			rawReq := logRequest(hreq)
-			if err := hreq.Write(dest_conn); err != nil {
+			if _, err := req.WriteTo(dest_conn); err != nil {
 				clog("Error forwarding request to destination: " + err.Error())
 				return
 			}
@@ -138,7 +148,7 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 				res.Header.SetContentLength(len(body))
 			}
 
-			ReplaceMatchedResponse(res)
+			// ReplaceMatchedResponse(res)
 			hres, err := fasthttpResponseToHTTPResponse(res)
 			if err != nil {
 				clog("fasthttpResponseToHTTPResponse: " + err.Error())
@@ -146,7 +156,7 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 			}
 
 			rawRes := logResponse(hres)
-			if err := hres.Write(client_conn); err != nil {
+			if _, err := res.WriteTo(client_conn); err != nil {
 				clog("Error forwarding response to client: " + err.Error())
 				return
 			}

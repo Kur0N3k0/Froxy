@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -96,11 +97,16 @@ func DecodeBodyAll(contentEncoding string, body []byte) []byte {
 }
 
 func logRequest(req *http.Request) []byte {
+	var bodyCopy bytes.Buffer
+	req.Body = ioutil.NopCloser(io.TeeReader(req.Body, &bodyCopy))
+
 	dump, err := httputil.DumpRequest(req, true)
 	if err != nil {
 		clog("Error dumping request: " + err.Error())
 		return nil
 	}
+
+	req.Body = ioutil.NopCloser(&bodyCopy)
 
 	log.Println("Request:")
 	log.Println(string(dump))
@@ -108,11 +114,16 @@ func logRequest(req *http.Request) []byte {
 }
 
 func logResponse(res *http.Response) []byte {
+	var bodyCopy bytes.Buffer
+	res.Body = ioutil.NopCloser(io.TeeReader(res.Body, &bodyCopy))
+
 	dump, err := httputil.DumpResponse(res, true)
 	if err != nil {
 		log.Printf("Error dumping response: %v", err)
 		return nil
 	}
+
+	res.Body = ioutil.NopCloser(&bodyCopy)
 
 	log.Println("Response:")
 	log.Println(string(dump))
