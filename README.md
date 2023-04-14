@@ -42,7 +42,7 @@ Ctrl + Shift + E: Selection URL decoding (encodeURIComponent)
 - [x] Request/Response Match & Replace
 - [ ] Interceptor
 - [ ] En/Decoder Window
-- [ ] Socks5 Support
+- [x] Socks5 Support
 - [ ] Websocket Support
 - [ ] HTTP/2 Support
 - [ ] Raw TCP Support
