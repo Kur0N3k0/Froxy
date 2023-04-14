@@ -3,6 +3,8 @@ package proxy
 import (
 	"regexp"
 	"sync"
+
+	nproxy "golang.org/x/net/proxy"
 )
 
 type rootCert struct {
@@ -43,3 +45,4 @@ var callback func(ProxyHistory)
 var clog func(string)
 var History []ProxyHistory = make([]ProxyHistory, 0)
 var historyMutex sync.Mutex
+var Socks5 nproxy.Dialer = nil

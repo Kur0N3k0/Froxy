@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 
+	nproxy "golang.org/x/net/proxy"
+
 	"github.com/asticode/go-astilectron"
 )
 
@@ -76,6 +78,14 @@ func handleIssue(m *astilectron.EventMessage) interface{} {
 			return http.ErrUseLastResponse
 		},
 	}
+	if proxy.Socks5 != nil {
+		client.Transport = &http.Transport{
+			DisableCompression: true,
+			Dial:               proxy.Socks5.Dial,
+			TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+
 	res, err := client.Do(nreq)
 	if err != nil {
 		return "Do " + err.Error()
@@ -173,6 +183,33 @@ func handleDeleteMatchReplace(m *astilectron.EventMessage) interface{} {
 	proxy.MrRules = append(proxy.MrRules[:mrType.Idx], proxy.MrRules[mrType.Idx+1:]...)
 	return map[string]interface{}{
 		"type":  "delete_match_replace",
+		"error": false,
+	}
+}
+
+func handleSetSocks5(m *astilectron.EventMessage) interface{} {
+	var sType MessageSocks5Type
+	m.Unmarshal(&sType)
+
+	parsedProxyUrl, err := url.Parse(sType.Addr)
+	if err != nil {
+		return map[string]interface{}{
+			"type":  "set_socks5",
+			"error": true,
+		}
+	}
+
+	socksProxy, err := nproxy.FromURL(parsedProxyUrl, nproxy.Direct)
+	if err != nil {
+		return map[string]interface{}{
+			"type":  "set_socks5",
+			"error": true,
+		}
+	}
+
+	proxy.Socks5 = socksProxy
+	return map[string]interface{}{
+		"type":  "set_socks5",
 		"error": false,
 	}
 }

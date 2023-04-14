@@ -32,7 +32,22 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 	host := strings.Split(ctxHost, ":")[0]
 	fmt.Println("Tunneling:", host)
 
-	dest_conn, err := tls.Dial("tcp", ctxHost, &tls.Config{InsecureSkipVerify: true})
+	var dest_conn *tls.Conn
+	var err error
+
+	if Socks5 != nil {
+		con, err := Socks5.Dial("tcp", ctxHost)
+		if err != nil {
+			clog("Socks5.Dial: " + err.Error())
+			ctx.Error(err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		dest_conn = tls.Client(con, &tls.Config{InsecureSkipVerify: true})
+		dest_conn.Handshake()
+	} else {
+		dest_conn, err = tls.Dial("tcp", ctxHost, &tls.Config{InsecureSkipVerify: true})
+	}
+
 	if err != nil {
 		clog("tls.Dial: " + err.Error())
 		ctx.Error(err.Error(), http.StatusServiceUnavailable)
@@ -160,8 +175,17 @@ func handleHTTP(ctx *fasthttp.RequestCtx) {
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(resp)
 
+	client := fasthttp.Client{
+		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	if Socks5 != nil {
+		client.Dial = func(addr string) (net.Conn, error) {
+			return Socks5.Dial("tcp", addr)
+		}
+	}
+
 	ReplaceMatchedRequest(&ctx.Request)
-	if err := fasthttp.Do(&ctx.Request, resp); err != nil {
+	if err := client.Do(&ctx.Request, resp); err != nil {
 		ctx.Error(err.Error(), http.StatusServiceUnavailable)
 		return
 	}

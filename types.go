@@ -44,6 +44,10 @@ type MessageMatchReplaceType struct {
 	Enabled bool   `json:"enabled"`
 }
 
+type MessageSocks5Type struct {
+	Addr string `json:"addr"`
+}
+
 const (
 	MSG_HISTORY               = "history"
 	MSG_ISSUE                 = "issue"
@@ -51,6 +55,7 @@ const (
 	MSG_ENABLE_MATCH_REPLACE  = "enable_match_replace"
 	MSG_DISABLE_MATCH_REPLACE = "disable_match_replace"
 	MSG_DELETE_MATCH_REPLACE  = "delete_match_replace"
+	MSG_SET_SOCKS5            = "set_socks5"
 )
 
 const (

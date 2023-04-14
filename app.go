@@ -107,6 +107,8 @@ func main() {
 						return handleStatusMatchReplace(m)
 					case MSG_DELETE_MATCH_REPLACE:
 						return handleDeleteMatchReplace(m)
+					case MSG_SET_SOCKS5:
+						return handleSetSocks5(m)
 					}
 					return nil
 				})
