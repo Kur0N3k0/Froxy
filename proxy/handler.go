@@ -110,7 +110,7 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 			req.Header.Del("Transfer-Encoding")
 			req.Header.Del("Upgrade")
 
-			// ReplaceMatchedRequest(req)
+			ReplaceMatchedRequest(req)
 			hreq, err := fasthttpRequestToHTTPRequest(req)
 			if err != nil {
 				clog("fasthttpRequestToHTTPRequest: " + err.Error())
@@ -148,7 +148,7 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 				res.Header.SetContentLength(len(body))
 			}
 
-			// ReplaceMatchedResponse(res)
+			ReplaceMatchedResponse(res)
 			hres, err := fasthttpResponseToHTTPResponse(res)
 			if err != nil {
 				clog("fasthttpResponseToHTTPResponse: " + err.Error())

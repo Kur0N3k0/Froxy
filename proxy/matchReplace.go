@@ -23,8 +23,16 @@ func ReplaceMatchedBytes(matched []byte, mType string) []byte {
 
 func ReplaceMatchedRequest(req *fasthttp.Request) {
 	req.Header.VisitAll(func(key, value []byte) {
+		if string(key) == "Cookie" {
+			return
+		}
 		req.Header.SetBytesKV(key, ReplaceMatchedBytes(value, MR_REQUEST_HEADER))
 	})
+
+	req.Header.VisitAllCookie(func(key, value []byte) {
+		req.Header.SetCookieBytesKV(key, ReplaceMatchedBytes(value, MR_REQUEST_COOKIE))
+	})
+
 	req.SetBody(ReplaceMatchedBytes(req.Body(), MR_REQUEST_BODY))
 }
 
