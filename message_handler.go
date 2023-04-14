@@ -191,6 +191,8 @@ func handleSetSocks5(m *astilectron.EventMessage) interface{} {
 	var sType MessageSocks5Type
 	m.Unmarshal(&sType)
 
+	proxy.Socks5 = nil
+
 	parsedProxyUrl, err := url.Parse(sType.Addr)
 	if err != nil {
 		return map[string]interface{}{
