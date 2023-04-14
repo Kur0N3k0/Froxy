@@ -160,6 +160,7 @@ func handleHTTP(ctx *fasthttp.RequestCtx) {
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(resp)
 
+	ReplaceMatchedRequest(&ctx.Request)
 	if err := fasthttp.Do(&ctx.Request, resp); err != nil {
 		ctx.Error(err.Error(), http.StatusServiceUnavailable)
 		return
@@ -191,6 +192,7 @@ func handleHTTP(ctx *fasthttp.RequestCtx) {
 	resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
 	resp.SetBody(body)
 
+	ReplaceMatchedResponse(resp)
 	newResponse, err := fasthttpResponseToHTTPResponse(resp)
 	if err != nil {
 		clog(err.Error())
