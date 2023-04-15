@@ -12,15 +12,17 @@ if [ ! -f "proxy/ca.key" ] || [ ! -f "proxy/ca.crt" ] || [ ! -f "proxy/cert.key"
     cd ..
 fi
 
-ca_cert=$(cat "$ca_cert_file")
-ca_key=$(cat "$ca_key_file")
-cert_key=$(cat "$cert_key_file")
+if [ ! -f "proxy/froxy.go" ]; then
+    ca_cert=$(cat "$ca_cert_file")
+    ca_key=$(cat "$ca_key_file")
+    cert_key=$(cat "$cert_key_file")
 
-proxy_template=$(cat "$proxy_template_file")
-proxy_go="${proxy_template//__CA_CRT__/$ca_cert}"
-proxy_go="${proxy_go//__CA_KEY__/$ca_key}"
-proxy_go="${proxy_go//__CERT_KEY__/$cert_key}"
+    proxy_template=$(cat "$proxy_template_file")
+    proxy_go="${proxy_template//__CA_CRT__/$ca_cert}"
+    proxy_go="${proxy_go//__CA_KEY__/$ca_key}"
+    proxy_go="${proxy_go//__CERT_KEY__/$cert_key}"
 
-echo "$proxy_go" > "$output_file"
+    echo "$proxy_go" > "$output_file"
+fi
 
 astilectron-bundler

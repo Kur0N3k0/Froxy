@@ -1,6 +1,6 @@
 {
   "app_name": "Froxy",
   "environments": [
-    {"arch": "amd64", "os": "windows"}
+    {"arch": "arm64", "os": "darwin"}
   ]
 }

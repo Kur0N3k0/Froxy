@@ -2,7 +2,10 @@ package proxy
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
+	"github.com/dgrr/http2"
 	"github.com/valyala/fasthttp"
 )
 
@@ -16,11 +19,35 @@ func RunProxy(addr string, cb func(ProxyHistory), flog func(string)) {
 	callback = cb
 	clog = flog
 
-	fasthttp.ListenAndServe(":9505", func(ctx *fasthttp.RequestCtx) {
+	handler := func(ctx *fasthttp.RequestCtx) {
+		ips := ctx.RemoteIP()
+
+		ctxHost := string(ctx.Host())
+		port, _ := strconv.Atoi(strings.Split(ctxHost, ":")[1])
+
+		if ips.IsLoopback() && port == 9505 {
+			handleLocalhost(ctx)
+			return
+		}
+
+		if websocket.FastHTTPIsWebSocketUpgrade(ctx) {
+			clog("Websocket")
+			handleWebSocket(ctx)
+			return
+		}
+
 		if string(ctx.Method()) == http.MethodConnect {
 			handleTunneling(ctx)
 		} else {
 			handleHTTP(ctx)
 		}
-	})
+		ctx.Response.SetStatusCode(http.StatusOK)
+	}
+
+	server := &fasthttp.Server{
+		Handler: handler,
+	}
+
+	http2.ConfigureServer(server, http2.ServerConfig{})
+	fasthttp.ListenAndServe(":9505")
 }

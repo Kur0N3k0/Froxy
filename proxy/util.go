@@ -12,14 +12,17 @@ import (
 	"io/ioutil"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/gobwas/ws"
 	"github.com/valyala/fasthttp"
 )
 
@@ -108,8 +111,8 @@ func logRequest(req *http.Request) []byte {
 
 	req.Body = ioutil.NopCloser(&bodyCopy)
 
-	log.Println("Request:")
-	log.Println(string(dump))
+	// log.Println("Request:")
+	// log.Println(string(dump))
 	return dump
 }
 
@@ -125,8 +128,8 @@ func logResponse(res *http.Response) []byte {
 
 	res.Body = ioutil.NopCloser(&bodyCopy)
 
-	log.Println("Response:")
-	log.Println(string(dump))
+	// log.Println("Response:")
+	// log.Println(string(dump))
 	return dump
 }
 
@@ -192,4 +195,55 @@ func fasthttpResponseToHTTPResponse(resp *fasthttp.Response) (*http.Response, er
 	}
 
 	return httpResp, nil
+}
+
+func logFrame(prefix string, opcode int, payload []byte) {
+	log.Printf("%s OpCode: %d, Payload: %s\n", prefix, opcode, payload)
+}
+
+func proxyAndLogWebsocket(client_conn, dest_conn net.Conn) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for {
+			frame, err := ws.ReadFrame(client_conn)
+			if err != nil {
+				if err != io.EOF {
+					log.Println("Error reading frame from client:", err)
+				}
+				break
+			}
+			logFrame("Client -> Server", int(frame.Header.OpCode), frame.Payload)
+
+			err = ws.WriteFrame(dest_conn, frame)
+			if err != nil {
+				log.Println("Error writing frame to destination:", err)
+				break
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for {
+			frame, err := ws.ReadFrame(dest_conn)
+			if err != nil {
+				if err != io.EOF {
+					log.Println("Error reading frame from destination:", err)
+				}
+				break
+			}
+			logFrame("Server -> Client", int(frame.Header.OpCode), frame.Payload)
+
+			err = ws.WriteFrame(client_conn, frame)
+			if err != nil {
+				log.Println("Error writing frame to client:", err)
+				break
+			}
+		}
+	}()
+
+	wg.Wait()
 }

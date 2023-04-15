@@ -9,7 +9,7 @@ import (
 	bootstrap "github.com/asticode/go-astilectron-bootstrap"
 )
 
-func main() {
+func xmain() {
 	if err := bootstrap.Run(bootstrap.Options{
 		Asset:    Asset,
 		AssetDir: AssetDir,

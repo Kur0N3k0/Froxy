@@ -5,12 +5,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/fasthttp/websocket"
 	"github.com/valyala/fasthttp"
 )
 
@@ -25,6 +25,12 @@ func SaveConnInContext(ctx context.Context, c net.Conn) context.Context {
 }
 func GetConn(r *http.Request) net.Conn {
 	return r.Context().Value(ConnContextKey).(net.Conn)
+}
+
+var upgrader = websocket.FastHTTPUpgrader{
+	CheckOrigin: func(ctx *fasthttp.RequestCtx) bool {
+		return true
+	},
 }
 
 func handleTunneling(ctx *fasthttp.RequestCtx) {
@@ -72,7 +78,7 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 		defer dest_conn.Close()
 		defer client_conn.Close()
 
-		clientReader := bufio.NewReader(client_conn)
+		clientReader := bufio.NewReaderSize(client_conn, 64*1024)
 		destReader := bufio.NewReaderSize(dest_conn, 64*1024)
 
 		for {
@@ -82,6 +88,13 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 			err := req.Read(clientReader)
 			if err != nil {
 				clog("Error reading from client: " + err.Error())
+				return
+			}
+
+			if string(req.Header.Peek("Upgrade")) == "websocket" {
+				clog("websocket")
+				req.WriteTo(dest_conn)
+				proxyAndLogWebsocket(client_conn, dest_conn)
 				return
 			}
 
@@ -251,7 +264,7 @@ func handleHTTP(ctx *fasthttp.RequestCtx) {
 	callback(curhis)
 	historyMutex.Unlock()
 
-	log.Println(req.RemoteAddr, " ", resp.StatusCode())
+	// log.Println(req.RemoteAddr, " ", resp.StatusCode())
 
 	ctx.Response.SetStatusCode(resp.StatusCode())
 	ctx.Response.Header.SetProtocol(resp.Header.Protocol())
@@ -259,4 +272,64 @@ func handleHTTP(ctx *fasthttp.RequestCtx) {
 		ctx.Response.Header.SetBytesKV(key, value)
 	})
 	ctx.Response.SetBody(resp.Body())
+}
+
+func handleLocalhost(ctx *fasthttp.RequestCtx) {
+	ctx.Response.SetStatusCode(http.StatusOK)
+	ctx.Response.SetBody([]byte("[ca.crt]\n" + string(root.cacrt)))
+}
+
+func handleWebSocket(ctx *fasthttp.RequestCtx) {
+	err := upgrader.Upgrade(ctx, func(clientConn *websocket.Conn) {
+		defer clientConn.Close()
+
+		url := fmt.Sprintf("Ws://%s%s", ctx.Host(), ctx.Path())
+
+		// Connect to target WebSocket server
+		targetConn, _, err := websocket.DefaultDialer.Dial(url, nil)
+		if err != nil {
+			clog("Failed to connect to target WebSocket server: " + err.Error())
+			return
+		}
+		defer targetConn.Close()
+
+		// Concurrently forward messages between client and target server
+		go func() {
+			defer clientConn.Close()
+			defer targetConn.Close()
+			for {
+				messageType, message, err := clientConn.ReadMessage()
+				if err != nil {
+					clog("Failed to read message from client: " + err.Error())
+					break
+				}
+
+				logFrame("Client -> Server", messageType, message)
+
+				if err := targetConn.WriteMessage(messageType, message); err != nil {
+					clog("Failed to write message to target server: " + err.Error())
+					break
+				}
+			}
+		}()
+
+		// Concurrently forward messages between target server and client
+		for {
+			messageType, message, err := targetConn.ReadMessage()
+			if err != nil {
+				clog("Failed to read message from target server: " + err.Error())
+				break
+			}
+			logFrame("Server -> Client", messageType, message)
+
+			if err := clientConn.WriteMessage(messageType, message); err != nil {
+				clog("Failed to write message to client: " + err.Error())
+				break
+			}
+		}
+	})
+
+	if err != nil {
+		clog("Failed to upgrade connection to WebSocket: " + err.Error())
+	}
 }
