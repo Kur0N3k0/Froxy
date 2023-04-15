@@ -20,12 +20,10 @@ func RunProxy(addr string, cb func(ProxyHistory), flog func(string)) {
 	clog = flog
 
 	handler := func(ctx *fasthttp.RequestCtx) {
-		ips := ctx.RemoteIP()
-
 		ctxHost := string(ctx.Host())
-		port, _ := strconv.Atoi(strings.Split(ctxHost, ":")[1])
+		host, port := getHostAndPort(ctxHost, ctx.IsTLS())
 
-		if ips.IsLoopback() && port == 9505 {
+		if net.ParseIP(host).IsLoopback() && port == "9505" {
 			handleLocalhost(ctx)
 			return
 		}
@@ -41,13 +39,15 @@ func RunProxy(addr string, cb func(ProxyHistory), flog func(string)) {
 		} else {
 			handleHTTP(ctx)
 		}
-		ctx.Response.SetStatusCode(http.StatusOK)
 	}
 
 	server := &fasthttp.Server{
 		Handler: handler,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
 	}
 
 	http2.ConfigureServer(server, http2.ServerConfig{})
-	fasthttp.ListenAndServe(":9505")
+	fasthttp.ListenAndServe(":9505", handler)
 }

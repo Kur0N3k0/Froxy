@@ -247,3 +247,21 @@ func proxyAndLogWebsocket(client_conn, dest_conn net.Conn) {
 
 	wg.Wait()
 }
+
+func getHostAndPort(hostAndPort string, isTLS bool) (string, string) {
+	host, port, err := net.SplitHostPort(hostAndPort)
+	if err != nil {
+		if err, ok := err.(*net.AddrError); ok && err.Err == "missing port in address" {
+			host = hostAndPort
+			if isTLS {
+				port = "443"
+			} else {
+				port = "80"
+			}
+		} else {
+			fmt.Println("Error splitting host and port:", err)
+			return "", ""
+		}
+	}
+	return host, port
+}

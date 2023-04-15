@@ -43,7 +43,7 @@ Ctrl + Shift + E: Selection URL decoding (encodeURIComponent)
 - [ ] Interceptor
 - [ ] En/Decoder Window
 - [x] Socks5 Support
-- [ ] Websocket Support
+- [x] Websocket Support
 - [ ] HTTP/2 Support
 - [ ] Raw TCP Support
 - [ ] Encode/Encrypted TCP Packet Plugin(javscript)
