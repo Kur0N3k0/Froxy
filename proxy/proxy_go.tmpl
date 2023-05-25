@@ -1,11 +1,10 @@
 package proxy
 
 import (
+	"net"
 	"net/http"
-	"strconv"
-	"strings"
 
-	"github.com/dgrr/http2"
+	"github.com/fasthttp/websocket"
 	"github.com/valyala/fasthttp"
 )
 
@@ -41,13 +40,13 @@ func RunProxy(addr string, cb func(ProxyHistory), flog func(string)) {
 		}
 	}
 
-	server := &fasthttp.Server{
-		Handler: handler,
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
+	// server := &fasthttp.Server{
+	// 	Handler: handler,
+	// 	TLSConfig: &tls.Config{
+	// 		InsecureSkipVerify: true,
+	// 	},
+	// }
 
-	http2.ConfigureServer(server, http2.ServerConfig{})
+	// http2.ConfigureServer(server, http2.ServerConfig{})
 	fasthttp.ListenAndServe(":9505", handler)
 }

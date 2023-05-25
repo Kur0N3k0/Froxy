@@ -25,4 +25,5 @@ if [ ! -f "proxy/froxy.go" ]; then
     echo "$proxy_go" > "$output_file"
 fi
 
-astilectron-bundler
+~/go/bin/astilectron-bundler
+go build test.go

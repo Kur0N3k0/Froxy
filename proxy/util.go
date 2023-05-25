@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -26,13 +27,22 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func genCert(host string) {
-	certKeyPem, _ := pem.Decode(root.certkey)
-	certKey, err := x509.ParsePKCS8PrivateKey(certKeyPem.Bytes)
-	if err != nil {
-		clog("ParsePKCS8PrivateKey: " + err.Error())
+func parsePrivateKey(caCert *x509.Certificate, key []byte) (interface{}, error) {
+	keyPem, _ := pem.Decode(key)
+	switch caCert.PublicKeyAlgorithm {
+	case x509.RSA:
+		if caCert.PublicKey.(*rsa.PublicKey) != nil {
+			return x509.ParsePKCS1PrivateKey(keyPem.Bytes)
+		} else {
+			return x509.ParsePKCS8PrivateKey(keyPem.Bytes)
+		}
+	case x509.ECDSA:
+		return x509.ParseECPrivateKey(keyPem.Bytes)
 	}
+	return nil, errors.New("Invalid PrivateKey type")
+}
 
+func genCert(host string) {
 	clientCert := x509.Certificate{
 		SerialNumber: big.NewInt(9505),
 		Subject: pkix.Name{
@@ -54,10 +64,16 @@ func genCert(host string) {
 		return
 	}
 
-	caKeyPem, _ := pem.Decode(root.cakey)
-	caKey, err := x509.ParsePKCS8PrivateKey(caKeyPem.Bytes)
+	certKey, err := parsePrivateKey(caCert, root.certkey)
 	if err != nil {
 		clog("ParsePKCS8PrivateKey: " + err.Error())
+		return
+	}
+
+	caKey, err := parsePrivateKey(caCert, root.cakey)
+	if err != nil {
+		clog("ParsePKCS8PrivateKey: " + err.Error())
+		return
 	}
 	cert, err := x509.CreateCertificate(rand.Reader, &clientCert, caCert, certKey.(*rsa.PrivateKey).Public(), caKey)
 	if err != nil {
@@ -110,9 +126,6 @@ func logRequest(req *http.Request) []byte {
 	}
 
 	req.Body = ioutil.NopCloser(&bodyCopy)
-
-	// log.Println("Request:")
-	// log.Println(string(dump))
 	return dump
 }
 
@@ -127,9 +140,6 @@ func logResponse(res *http.Response) []byte {
 	}
 
 	res.Body = ioutil.NopCloser(&bodyCopy)
-
-	// log.Println("Response:")
-	// log.Println(string(dump))
 	return dump
 }
 
@@ -155,11 +165,6 @@ func fasthttpRequestToHTTPRequest(req *fasthttp.Request) (*http.Request, error) 
 }
 
 func fasthttpResponseToHTTPResponse(resp *fasthttp.Response) (*http.Response, error) {
-	// contentLength := int64(0)
-	// if resp.Header.ContentLength() > 0 {
-	// 	contentLength = int64(resp.Header.ContentLength())
-	// }
-
 	httpResp := &http.Response{
 		Status:           string(resp.Header.StatusMessage()),
 		StatusCode:       resp.StatusCode(),
