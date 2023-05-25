@@ -94,6 +94,11 @@ func handleTunneling(ctx *fasthttp.RequestCtx) {
 			if string(req.Header.Peek("Upgrade")) == "websocket" {
 				clog("websocket")
 				req.WriteTo(dest_conn)
+				res := fasthttp.AcquireResponse()
+				defer fasthttp.ReleaseResponse(res)
+				res.Read(destReader)
+				res.WriteTo(client_conn)
+
 				proxyAndLogWebsocket(client_conn, dest_conn)
 				return
 			}

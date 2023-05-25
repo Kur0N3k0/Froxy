@@ -26,4 +26,4 @@ if [ ! -f "proxy/froxy.go" ]; then
 fi
 
 ~/go/bin/astilectron-bundler
-go build test.go
+#go build test.go
